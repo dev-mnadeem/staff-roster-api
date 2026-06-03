@@ -1,0 +1,53 @@
+import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { AppController } from '@/app.controller';
+import { SupabaseModule } from '@/supabase/supabase.module';
+import { IdentityModule } from '@/identity/identity.module';
+import { DatabaseModule } from '@/database/database.module';
+import { AuthModule } from '@/auth/auth.module';
+import { LocationsModule } from '@/locations/locations.module';
+import { SkillsModule } from '@/skills/skills.module';
+import { TeamModule } from '@/team/team.module';
+import { ShiftsModule } from '@/shifts/shifts.module';
+import { AvailabilityModule } from '@/availability/availability.module';
+import { ConstraintsModule } from '@/constraints/constraints.module';
+import { AssignmentsModule } from '@/assignments/assignments.module';
+import { OvertimeModule } from '@/overtime/overtime.module';
+import { SwapsModule } from '@/swaps/swaps.module';
+import { NotificationsModule } from '@/notifications/notifications.module';
+import { AuditModule } from '@/audit/audit.module';
+import { OnDutyModule } from '@/on-duty/on-duty.module';
+import { AnalyticsModule } from '@/analytics/analytics.module';
+import { PlannerModule } from '@/planner/planner.module';
+import { ScopeModule } from '@/common/scope/scope.module';
+
+@Module({
+  imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+      cache: true,
+    }),
+    SupabaseModule,
+    DatabaseModule,
+    IdentityModule,
+    ScopeModule,
+    AuthModule,
+    LocationsModule,
+    SkillsModule,
+    TeamModule,
+    ShiftsModule,
+    AvailabilityModule,
+    ConstraintsModule,
+    AssignmentsModule,
+    OvertimeModule,
+    SwapsModule,
+    NotificationsModule,
+    AuditModule,
+    OnDutyModule,
+    AnalyticsModule,
+    PlannerModule,
+  ],
+  controllers: [AppController],
+  providers: [],
+})
+export class AppModule {}
