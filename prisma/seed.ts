@@ -22,6 +22,11 @@ const USE_SUPABASE =
 
 const SHARED_PASSWORD = process.env.SEED_PASSWORD ?? 'CoastalEats!2026';
 
+// The seed resets every shift, assignment, swap and audit entry. Container
+// starts pass --if-empty so restarting the stack keeps what people changed;
+// run without it to reset the demo data on purpose.
+const ONLY_IF_EMPTY = process.argv.includes('--if-empty');
+
 type SeedUser = {
   email: string;
   displayName: string;
@@ -160,6 +165,11 @@ async function main(): Promise<void> {
     : null;
 
   try {
+    if (ONLY_IF_EMPTY && (await prisma.location.count()) > 0) {
+      console.log('Database already has data; skipping the seed.');
+      return;
+    }
+
     console.log('🌊 Seeding ShiftSync…');
     console.log(`  identity: ${supabase ? 'supabase' : 'local'}`);
 

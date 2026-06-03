@@ -1,18 +1,21 @@
-# The whole ShiftSync stack, with no accounts to create and no keys to obtain:
+# The ShiftSync API with its database, with no accounts to create and no
+# keys to obtain:
 #
 #   docker compose up --build
 #
-# Run from the shiftsync-be repo. Both repos must be cloned as siblings, since
-# the web service builds from ../shiftsync-fe:
+# With no Supabase credentials the API runs its self-hosted identity provider,
+# and on first start the database is seeded with four locations and fifteen
+# people; sign in with any of the accounts in the README. Add Supabase values
+# to .env to switch identity providers; nothing else changes.
+#
+# The web frontend is opt-in, because it builds from a sibling checkout of
+# shiftsync-fe:
 #
 #   parent/
 #   ├── shiftsync-be/   <- run compose here
 #   └── shiftsync-fe/
 #
-# With no Supabase credentials the API runs its self-hosted identity provider,
-# the database is seeded with four locations and nine staff, and you sign in
-# with any of the printed accounts. Add Supabase values to .env to switch —
-# nothing else changes.
+#   docker compose --profile web up --build
 
 name: shiftsync
 
@@ -57,13 +60,15 @@ services:
       db:
         condition: service_healthy
     # Migrations and seed run here rather than in an image layer, because both
-    # need the container's network view of the database.
+    # need the container's network view of the database. The seed only fills
+    # an empty database, so a restart keeps whatever was changed since.
     command: >
       sh -c "npx prisma migrate deploy &&
-             npm run seed:prod &&
+             npm run seed:prod -- --if-empty &&
              node dist/src/main.js"
 
   web:
+    profiles: [web]
     build:
       context: ../shiftsync-fe
       args:
