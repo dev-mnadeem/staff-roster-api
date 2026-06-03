@@ -9,6 +9,8 @@ import type {
   IdentityProvider,
 } from '@/identity/identity.types';
 
+const LIST_USERS_PAGE_SIZE = 1000;
+
 /**
  * Identity backed by Supabase Auth.
  *
@@ -64,21 +66,26 @@ export class SupabaseIdentityProvider implements IdentityProvider {
     if (!this.supabase) return map;
     if (userIds && userIds.length === 0) return map;
 
+    // The admin API is paged; reading only the first page silently dropped
+    // everyone after the first few hundred accounts.
     const wanted = userIds ? new Set(userIds) : null;
-    const { data, error } = await this.supabase.auth.admin.listUsers({
-      page: 1,
-      perPage: 200,
-    });
-    if (error) {
-      this.logger.error(`Failed to list auth users: ${error.message}`);
-      return map;
-    }
-    for (const user of data.users) {
-      if (user.email && (!wanted || wanted.has(user.id))) {
-        map.set(user.id, user.email);
+    for (let page = 1; ; page += 1) {
+      const { data, error } = await this.supabase.auth.admin.listUsers({
+        page,
+        perPage: LIST_USERS_PAGE_SIZE,
+      });
+      if (error) {
+        this.logger.error(`Failed to list auth users: ${error.message}`);
+        return map;
       }
+      for (const user of data.users) {
+        if (user.email && (!wanted || wanted.has(user.id))) {
+          map.set(user.id, user.email);
+        }
+      }
+      const lastPage = data.users.length < LIST_USERS_PAGE_SIZE;
+      if (lastPage || (wanted && map.size === wanted.size)) return map;
     }
-    return map;
   }
 
   async getAccount(userId: string): Promise<AuthAccount | null> {

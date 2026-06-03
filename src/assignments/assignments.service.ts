@@ -48,7 +48,9 @@ export class AssignmentsService {
     await this.assertCanReadShift(shiftId, actorId);
     const rows = await this.assignmentRepository.listForShift(shiftId);
     if (rows.length === 0) return [];
-    const emailById = await this.fetchEmailMap();
+    const emailById = await this.identity.getEmailMap(
+      rows.map((row) => row.staffId),
+    );
     return rows.map((row) => this.toDto(row, emailById.get(row.staffId)));
   }
 
@@ -372,10 +374,6 @@ export class AssignmentsService {
   private describeError(error: unknown): string {
     if (error instanceof Error) return `${error.name}: ${error.message}`;
     return String(error);
-  }
-
-  private fetchEmailMap(): Promise<Map<string, string>> {
-    return this.identity.getEmailMap();
   }
 
   private async fetchEmail(staffId: string): Promise<string | undefined> {
