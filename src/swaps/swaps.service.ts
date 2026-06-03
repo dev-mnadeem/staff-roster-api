@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { Prisma, SwapStatus, SwapType, UserRole } from '@prisma/client';
 import { ConstraintEngine } from '@/constraints/constraint-engine';
+import { toEvaluationContext } from '@/constraints/evaluation.mapper';
 import { AssignmentRepository } from '@/database/repositories/assignment.repository';
 import { PrismaService } from '@/database/prisma.service';
 import {
@@ -191,8 +192,27 @@ export class SwapsService {
     };
   }
 
-  async findById(id: string): Promise<SwapRequestDto> {
+  /**
+   * Visible to the requester, the targeted peer, staff who could claim an
+   * open drop, and admins or managers of the shift's location.
+   */
+  async findById(id: string, actorId: string): Promise<SwapRequestDto> {
     const swap = await this.requireActive(id, { allowFinal: true });
+    if (swap.requesterId === actorId || swap.targetStaffId === actorId) {
+      return this.toDto(swap);
+    }
+    const locationId = swap.requestingAssignment.shift.locationId;
+    const ctx = await this.scopeService.contextFor(actorId);
+    const visible =
+      ctx.role === UserRole.admin ||
+      (ctx.role === UserRole.manager &&
+        (ctx.managedLocationIds ?? []).includes(locationId)) ||
+      (swap.type === SwapType.drop &&
+        swap.status === SwapStatus.pending &&
+        ctx.certifiedLocationIds.includes(locationId));
+    if (!visible) {
+      throw new ForbiddenException('Swap request not visible to you');
+    }
     return this.toDto(swap);
   }
 
@@ -268,144 +288,227 @@ export class SwapsService {
   }
 
   /**
-   * Manager approves a swap (drop: pending only; swap: must be accepted_by_peer).
-   * The actual assignment shuffle happens in a transaction; the constraint engine
-   * is re-run on the post-swap assignee.
+   * Manager approves a swap (drop: pending or claimed; swap: accepted_by_peer).
+   *
+   * The constraint engine is re-run for everyone who gains a shift. The
+   * requesting assignment is handed over in place rather than deleted: the
+   * request row cascades from it, so deleting it used to take the request
+   * down mid-transaction and every approval failed. An unclaimed drop is the
+   * exception — the assignment, and with it the request, is removed; the
+   * notification and audit entry record the decision.
    */
   async approve(id: string, decidedById: string): Promise<SwapRequestDto> {
-    return this.prisma.$transaction(async (tx) => {
-      const swap = await tx.swapRequest.findUnique({
-        where: { id },
-        include: {
-          requestingAssignment: { include: { shift: true } },
-        },
-      });
-      if (!swap) throw new NotFoundException(`Swap ${id} not found`);
-      this.assertNotFinal(swap.status);
-      await this.scopeService.assertCanManageLocation(
-        decidedById,
-        swap.requestingAssignment.shift.locationId,
-      );
+    const swap = await this.swapRepository.findById(id);
+    if (!swap) throw new NotFoundException(`Swap ${id} not found`);
+    this.assertNotFinal(swap.status);
+    const locationId = swap.requestingAssignment.shift.locationId;
+    await this.scopeService.assertCanManageLocation(decidedById, locationId);
 
-      if (swap.type === SwapType.drop) {
-        if (
-          swap.status !== SwapStatus.pending &&
-          swap.status !== SwapStatus.accepted_by_peer
-        ) {
-          throw new BadRequestException(
-            `Drop is in status ${swap.status}; only pending or claimed drops can be approved`,
+    const targetAssignment = await this.checkApprovable(swap);
+
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        // Claim the decision first so two managers cannot both apply it.
+        const decided = await tx.swapRequest.updateMany({
+          where: { id, status: swap.status },
+          data: {
+            status: SwapStatus.approved,
+            decidedById,
+            decidedAt: new Date(),
+          },
+        });
+        if (decided.count === 0) {
+          throw new ConflictException(
+            'Swap was changed by someone else; reload and try again',
           );
         }
 
-        if (swap.targetStaffId) {
-          // Drop was claimed by a staff member: re-run engine on the claimer
-          // and transfer the assignment.
-          const result = await this.evaluateForApprove(
-            swap.requestingAssignment.shiftId,
-            swap.targetStaffId,
-            null,
-          );
-          if (!result.allowed) {
-            throw new BadRequestException(
-              `Cannot approve drop: ${result.messages.join('; ')}`,
-            );
-          }
+        const touched = [swap.requestingAssignmentId];
+        if (targetAssignment) touched.push(targetAssignment.id);
+        await tx.swapRequest.updateMany({
+          where: {
+            id: { not: id },
+            status: { in: [SwapStatus.pending, SwapStatus.accepted_by_peer] },
+            OR: [
+              { requestingAssignmentId: { in: touched } },
+              { targetAssignmentId: { in: touched } },
+            ],
+          },
+          data: { status: SwapStatus.cancelled },
+        });
+
+        if (!swap.targetStaffId) {
           await tx.shiftAssignment.delete({
             where: { id: swap.requestingAssignmentId },
           });
-          await tx.shiftAssignment.create({
+          return;
+        }
+
+        // The peer gives up their shift before taking the requester's, so
+        // overlapping shifts never double-book either person mid-swap.
+        if (targetAssignment) {
+          await tx.shiftAssignment.delete({
+            where: { id: targetAssignment.id },
+          });
+        }
+        await tx.shiftAssignment.update({
+          where: { id: swap.requestingAssignmentId },
+          data: {
+            staffId: swap.targetStaffId,
+            assignedById: decidedById,
+            assignedAt: new Date(),
+          },
+        });
+        if (targetAssignment) {
+          const exchanged = await tx.shiftAssignment.create({
             data: {
-              shiftId: swap.requestingAssignment.shiftId,
-              staffId: swap.targetStaffId,
+              shiftId: targetAssignment.shiftId,
+              staffId: swap.requesterId,
               assignedById: decidedById,
             },
           });
-        } else {
-          // Unclaimed drop: just remove the requester's assignment.
-          await tx.shiftAssignment.delete({
-            where: { id: swap.requestingAssignmentId },
+          await tx.swapRequest.update({
+            where: { id },
+            data: { targetAssignmentId: exchanged.id },
           });
         }
-      } else {
-        if (swap.status !== SwapStatus.accepted_by_peer) {
-          throw new BadRequestException(
-            'Swap must be accepted by the peer before manager approval',
-          );
-        }
-        if (!swap.targetStaffId) {
-          throw new BadRequestException('Swap is missing target staff');
-        }
+      });
+    } catch (error) {
+      if (this.assignmentRepository.isUniqueViolation(error)) {
+        throw new ConflictException(
+          'The incoming staff member is already assigned to that shift',
+        );
+      }
+      if (this.assignmentRepository.isExclusionViolation(error)) {
+        throw new ConflictException(
+          'Database rejected the swap: someone would be double-booked',
+        );
+      }
+      throw error;
+    }
 
-        // Re-run engine on the peer for the requester's shift, excluding
-        // their swap-out assignment if any (it's about to be removed).
+    const refreshed = await this.swapRepository.findById(id);
+    const result: SwapRequestDto = refreshed
+      ? this.toDto(refreshed)
+      : {
+          ...this.toDto(swap),
+          status: SwapStatus.approved,
+          decidedById,
+          decidedAt: new Date().toISOString(),
+        };
+
+    const targets: string[] = [swap.requesterId];
+    if (swap.targetStaffId) targets.push(swap.targetStaffId);
+    void this.notificationsService.notifyMany(
+      targets.map((userId) => ({
+        userId,
+        type: 'swap_approved',
+        title:
+          swap.type === SwapType.drop
+            ? 'Your drop request was approved'
+            : 'Your swap was approved by the manager',
+        payload: { swapId: id },
+        email: true,
+      })),
+    );
+    void this.auditService.record({
+      actorId: decidedById,
+      entityType: 'swap_request',
+      entityId: id,
+      action: 'swap_approve',
+      before: { status: swap.status },
+      after: {
+        status: SwapStatus.approved,
+        shiftId: swap.requestingAssignment.shiftId,
+        from: swap.requesterId,
+        to: swap.targetStaffId,
+        exchangedShiftId: targetAssignment?.shiftId ?? null,
+      },
+      locationId,
+    });
+    return result;
+  }
+
+  /**
+   * Validates the request's state and re-runs the constraint engine for each
+   * person who gains a shift. Returns the peer's assignment being exchanged,
+   * if any.
+   */
+  private async checkApprovable(
+    swap: SwapWithRelations,
+  ): Promise<{ id: string; shiftId: string } | null> {
+    if (swap.type === SwapType.drop) {
+      if (
+        swap.status !== SwapStatus.pending &&
+        swap.status !== SwapStatus.accepted_by_peer
+      ) {
+        throw new BadRequestException(
+          `Drop is in status ${swap.status}; only pending or claimed drops can be approved`,
+        );
+      }
+      if (swap.targetStaffId) {
         const result = await this.evaluateForApprove(
           swap.requestingAssignment.shiftId,
           swap.targetStaffId,
-          swap.targetAssignmentId ?? null,
+          null,
         );
         if (!result.allowed) {
           throw new BadRequestException(
-            `Cannot approve swap: ${result.messages.join('; ')}`,
+            `Cannot approve drop: ${result.messages.join('; ')}`,
           );
         }
-
-        // Remove requester's assignment, optionally remove peer's assignment, add peer's.
-        await tx.shiftAssignment.delete({
-          where: { id: swap.requestingAssignmentId },
-        });
-        if (swap.targetAssignmentId) {
-          await tx.shiftAssignment.delete({
-            where: { id: swap.targetAssignmentId },
-          });
-        }
-        await tx.shiftAssignment.create({
-          data: {
-            shiftId: swap.requestingAssignment.shiftId,
-            staffId: swap.targetStaffId,
-            assignedById: decidedById,
-          },
-        });
       }
+      return null;
+    }
 
-      await tx.swapRequest.update({
-        where: { id },
-        data: {
-          status: SwapStatus.approved,
-          decidedById,
-          decidedAt: new Date(),
-        },
-      });
-
-      const refreshed = await this.swapRepository.findById(id);
-      if (!refreshed) throw new NotFoundException('Swap disappeared');
-
-      // Notify everyone affected (requester always, peer if swap).
-      const targets: string[] = [refreshed.requesterId];
-      if (refreshed.targetStaffId) targets.push(refreshed.targetStaffId);
-      void this.notificationsService.notifyMany(
-        targets.map((userId) => ({
-          userId,
-          type: 'swap_approved',
-          title:
-            refreshed.type === SwapType.drop
-              ? 'Your drop request was approved'
-              : 'Your swap was approved by the manager',
-          payload: { swapId: id },
-          email: true,
-        })),
+    if (swap.status !== SwapStatus.accepted_by_peer) {
+      throw new BadRequestException(
+        'Swap must be accepted by the peer before manager approval',
       );
-      void this.auditService.record({
-        actorId: decidedById,
-        entityType: 'swap_request',
-        entityId: id,
-        action: 'swap_approve',
-        before: { status: swap.status },
-        after: { status: SwapStatus.approved },
-        locationId: swap.requestingAssignment.shift.locationId,
-      });
+    }
+    if (!swap.targetStaffId) {
+      throw new BadRequestException('Swap is missing target staff');
+    }
 
-      return this.toDto(refreshed);
-    });
+    const targetAssignment = swap.targetAssignmentId
+      ? await this.prisma.shiftAssignment.findUnique({
+          where: { id: swap.targetAssignmentId },
+          select: { id: true, shiftId: true, staffId: true },
+        })
+      : null;
+    if (
+      swap.targetAssignmentId &&
+      targetAssignment?.staffId !== swap.targetStaffId
+    ) {
+      throw new ConflictException(
+        'The peer no longer holds the shift offered in exchange',
+      );
+    }
+
+    const peer = await this.evaluateForApprove(
+      swap.requestingAssignment.shiftId,
+      swap.targetStaffId,
+      targetAssignment?.id ?? null,
+    );
+    if (!peer.allowed) {
+      throw new BadRequestException(
+        `Cannot approve swap: ${peer.messages.join('; ')}`,
+      );
+    }
+    if (targetAssignment) {
+      const requester = await this.evaluateForApprove(
+        targetAssignment.shiftId,
+        swap.requesterId,
+        swap.requestingAssignmentId,
+      );
+      if (!requester.allowed) {
+        throw new BadRequestException(
+          `Cannot approve swap: ${requester.messages.join('; ')}`,
+        );
+      }
+      return { id: targetAssignment.id, shiftId: targetAssignment.shiftId };
+    }
+    return null;
   }
 
   async reject(
@@ -530,13 +633,18 @@ export class SwapsService {
       );
     }
 
-    await this.prisma.swapRequest.update({
-      where: { id },
+    const claimed = await this.prisma.swapRequest.updateMany({
+      where: { id, status: SwapStatus.pending, targetStaffId: null },
       data: {
         targetStaffId: claimerId,
         status: SwapStatus.accepted_by_peer,
       },
     });
+    if (claimed.count === 0) {
+      throw new ConflictException(
+        'Drop has already been claimed by another staff member',
+      );
+    }
 
     // Notify requester their drop was claimed; managers see it in the queue.
     void this.notificationsService.notify({
@@ -570,9 +678,9 @@ export class SwapsService {
   }
 
   /**
-   * Run the constraint engine for a candidate (peer or claimer) on the
-   * requester's shift, optionally excluding one of their assignments (for
-   * swap approve where the peer's other assignment is about to be removed).
+   * Run the constraint engine for a candidate (peer or claimer) on a shift,
+   * optionally ignoring one of their assignments that the same approval is
+   * about to take away from them.
    */
   private async evaluateForApprove(
     shiftId: string,
@@ -583,57 +691,19 @@ export class SwapsService {
       shiftId,
       candidateStaffId,
     );
-    if (!data.shift || !data.staff) {
+    const context = toEvaluationContext({
+      ...data,
+      staffAssignments: data.staffAssignments.filter(
+        (a) => a.id !== excludeAssignmentId,
+      ),
+    });
+    if (!context) {
       return {
         allowed: false,
         messages: ['Cannot reload data for re-validation'],
       };
     }
-    const filtered = excludeAssignmentId
-      ? data.staffAssignments.filter((a) => a.id !== excludeAssignmentId)
-      : data.staffAssignments;
-    const result = this.constraintEngine.evaluate({
-      staff: {
-        id: data.staff.id,
-        displayName: data.staff.displayName,
-        certifiedLocationIds: new Set(
-          data.staff.certifications.map((c) => c.locationId),
-        ),
-        skillIds: new Set(data.staff.skills.map((s) => s.skillId)),
-      },
-      shift: {
-        id: data.shift.id,
-        locationId: data.shift.locationId,
-        startAt: data.shift.startAt,
-        endAt: data.shift.endAt,
-        requiredSkillId: data.shift.requiredSkillId,
-        locationTimezone: data.shift.location.timezone,
-      },
-      availability: {
-        recurring: data.staff.recurringAvailability.map((r) => ({
-          weekday: r.weekday,
-          startTime: r.startTime,
-          endTime: r.endTime,
-          timezone: r.timezone,
-        })),
-        exceptions: data.staff.availabilityExceptions.map((e) => ({
-          date: e.date.toISOString().slice(0, 10),
-          isAvailable: e.isAvailable,
-          startTime: e.startTime,
-          endTime: e.endTime,
-          timezone: e.timezone,
-        })),
-      },
-      existingAssignments: filtered.map((a) => ({
-        shiftId: a.shift.id,
-        startAt: a.shift.startAt,
-        endAt: a.shift.endAt,
-        locationTimezone: a.shift.location.timezone,
-      })),
-      overtimeOverrides: data.overrides.map((o) => ({
-        effectiveDate: o.effectiveDate.toISOString().slice(0, 10),
-      })),
-    });
+    const result = this.constraintEngine.evaluate(context);
     return {
       allowed: result.allowed,
       messages: result.blocking.map((v) => v.message),

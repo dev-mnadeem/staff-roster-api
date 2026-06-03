@@ -79,9 +79,10 @@ export class SwapsController {
   @ApiOkResponse({ type: SwapRequestDto })
   @ApiNotFoundResponse({ description: 'Swap not found' })
   findById(
+    @CurrentUser() user: AuthenticatedUser,
     @Param('id', new ParseUUIDPipe()) id: string,
   ): Promise<SwapRequestDto> {
-    return this.swapsService.findById(id);
+    return this.swapsService.findById(id, user.id);
   }
 
   @Post()
