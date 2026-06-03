@@ -178,20 +178,24 @@ describe('ConstraintEngine', () => {
   });
 
   describe('consecutive days', () => {
-    /** One 8-hour shift per day, counting back from the day before the shift. */
-    const priorDays = (count: number) =>
-      Array.from({ length: count }, (_, i) => {
-        const day = new Date('2026-03-01T14:00:00Z');
-        day.setUTCDate(day.getUTCDate() - i);
+    /** One 8-hour shift on each given day offset from the Monday shift. */
+    const workedOn = (offsets: number[]) =>
+      offsets.map((offset) => {
+        const day = new Date('2026-03-02T14:00:00Z');
+        day.setUTCDate(day.getUTCDate() + offset);
         const end = new Date(day);
         end.setUTCHours(end.getUTCHours() + 8);
         return {
-          shiftId: `prior-${i}`,
+          shiftId: `worked-${offset}`,
           startAt: day,
           endAt: end,
           locationTimezone: NY,
         };
       });
+
+    /** One 8-hour shift per day, counting back from the day before the shift. */
+    const priorDays = (count: number) =>
+      workedOn(Array.from({ length: count }, (_, i) => -(i + 1)));
 
     it('warns on the sixth consecutive day', () => {
       const ctx = baseContext({ existingAssignments: priorDays(5) });
@@ -215,6 +219,34 @@ describe('ConstraintEngine', () => {
         overtimeOverrides: [{ effectiveDate: '2026-03-02' }],
       });
       expect(rules(ctx).blocking).not.toContain('consecutive_7_block');
+    });
+
+    it('blocks a shift that joins two stretches into seven days', () => {
+      // Thu–Sun worked, Mon is the proposed shift, Tue–Wed already rostered.
+      const ctx = baseContext({
+        existingAssignments: workedOn([-4, -3, -2, -1, 1, 2]),
+      });
+      const result = engine.evaluate(ctx);
+      expect(result.blocking.map((v) => v.rule)).toContain(
+        'consecutive_7_block',
+      );
+      expect(result.blocking[0].message).toContain('7 consecutive days');
+    });
+
+    it('counts days rostered after the shift, not only before it', () => {
+      const ctx = baseContext({
+        existingAssignments: workedOn([1, 2, 3, 4, 5]),
+      });
+      expect(rules(ctx).warnings).toContain('consecutive_6_warn');
+    });
+
+    it('stops counting at a day off', () => {
+      const ctx = baseContext({
+        existingAssignments: workedOn([-3, -2, -1, 2, 3, 4, 5]),
+      });
+      const result = rules(ctx);
+      expect(result.blocking).not.toContain('consecutive_7_block');
+      expect(result.warnings).not.toContain('consecutive_6_warn');
     });
   });
 

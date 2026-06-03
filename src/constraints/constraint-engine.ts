@@ -335,9 +335,10 @@ export class ConstraintEngine {
   }
 
   /**
-   * Counts consecutive distinct dates with a worked shift (≥ 1h) running
-   * backwards from the proposed shift's date. The proposed shift is included
-   * in the streak.
+   * Length of the run of consecutive worked dates (shifts of at least 1h)
+   * that the proposed shift would belong to. The run extends both ways: a
+   * shift that fills the gap between two stretches of work joins them, and
+   * one placed before an existing stretch extends it just the same.
    */
   private evaluateConsecutiveDays(
     ctx: EvaluationContext,
@@ -347,7 +348,7 @@ export class ConstraintEngine {
     const tz = ctx.shift.locationTimezone;
     const proposedDate = this.formatDateInTz(ctx.shift.startAt, tz);
 
-    const workedDates = new Set<string>([proposedDate]);
+    const workedDates = new Set<string>();
     for (const a of ctx.existingAssignments) {
       if (a.shiftId === ctx.shift.id) continue;
       if (this.shiftHours(a.startAt, a.endAt) < COUNTED_SHIFT_MIN_HOURS)
@@ -355,11 +356,20 @@ export class ConstraintEngine {
       workedDates.add(this.formatDateInTz(a.startAt, a.locationTimezone));
     }
 
-    let streak = 0;
-    let cursor = proposedDate;
-    while (workedDates.has(cursor)) {
+    let streak = 1;
+    for (
+      let d = this.shiftDate(proposedDate, -1);
+      workedDates.has(d);
+      d = this.shiftDate(d, -1)
+    ) {
       streak += 1;
-      cursor = this.previousDate(cursor);
+    }
+    for (
+      let d = this.shiftDate(proposedDate, 1);
+      workedDates.has(d);
+      d = this.shiftDate(d, 1)
+    ) {
+      streak += 1;
     }
 
     const name = this.staffName(ctx.staff);
@@ -372,14 +382,14 @@ export class ConstraintEngine {
         blocking.push({
           rule: 'consecutive_7_block',
           severity: 'block',
-          message: `${name} would be working a ${streak}th consecutive day; requires manager override with documented reason`,
+          message: `${name} would work ${streak} consecutive days; requires manager override with documented reason`,
         });
       }
     } else if (streak >= CONSECUTIVE_DAYS_WARN) {
       warnings.push({
         rule: 'consecutive_6_warn',
         severity: 'warn',
-        message: `${name} would be working a ${streak}th consecutive day`,
+        message: `${name} would work ${streak} consecutive days`,
       });
     }
   }
@@ -400,14 +410,10 @@ export class ConstraintEngine {
     return `${y}-${m}-${d}`;
   }
 
-  /** YYYY-MM-DD math without timezone conversion (assumes inputs are wall-clock). */
-  private previousDate(yyyymmdd: string): string {
+  /** Calendar arithmetic on a YYYY-MM-DD key; no timezone involved. */
+  private shiftDate(yyyymmdd: string, days: number): string {
     const [y, m, d] = yyyymmdd.split('-').map(Number);
-    const date = new Date(Date.UTC(y, m - 1, d));
-    date.setUTCDate(date.getUTCDate() - 1);
-    const y2 = date.getUTCFullYear();
-    const m2 = String(date.getUTCMonth() + 1).padStart(2, '0');
-    const d2 = String(date.getUTCDate()).padStart(2, '0');
-    return `${y2}-${m2}-${d2}`;
+    const date = new Date(Date.UTC(y, m - 1, d + days));
+    return date.toISOString().slice(0, 10);
   }
 }
