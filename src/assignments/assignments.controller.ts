@@ -118,7 +118,8 @@ export class AssignmentsController {
     description: 'Constraint violation (any blocking rule)',
   })
   @ApiConflictResponse({
-    description: 'Already assigned, or DB rejected as overlapping',
+    description:
+      'Already assigned, shift already at headcount, or DB rejected as overlapping',
   })
   create(
     @Param('shiftId', new ParseUUIDPipe()) shiftId: string,

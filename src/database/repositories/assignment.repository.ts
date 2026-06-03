@@ -102,7 +102,8 @@ export class AssignmentRepository {
    * Performs the assignment INSIDE a transaction. The DB-level EXCLUDE constraint
    * provides the final guarantee against concurrent double-booking; this also
    * locks the staff's existing rows FOR UPDATE so the constraint engine's view
-   * is consistent with what the INSERT will see.
+   * is consistent with what the INSERT will see, and locks the shift row so
+   * two managers filling the last slot at once cannot both get it.
    */
   async createTransactional(
     shiftId: string,
@@ -116,6 +117,15 @@ export class AssignmentRepository {
       await tx.$queryRaw`
         SELECT id FROM shift_assignments WHERE staff_id = ${staffId}::uuid FOR UPDATE
       `;
+      const locked = await tx.$queryRaw<{ headcount: number }[]>`
+        SELECT headcount FROM shifts WHERE id = ${shiftId}::uuid FOR UPDATE
+      `;
+      if (locked.length > 0) {
+        const filled = await tx.shiftAssignment.count({ where: { shiftId } });
+        if (filled >= locked[0].headcount) {
+          throw new ShiftFullError(filled, locked[0].headcount);
+        }
+      }
 
       const [shift, staff, staffAssignments, overrides] = await Promise.all([
         tx.shift.findUnique({
@@ -198,5 +208,14 @@ export class AssignmentRejectedError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'AssignmentRejectedError';
+  }
+}
+
+export class ShiftFullError extends Error {
+  constructor(filled: number, headcount: number) {
+    super(
+      `Shift is fully staffed (${filled} of ${headcount}); raise its headcount first`,
+    );
+    this.name = 'ShiftFullError';
   }
 }

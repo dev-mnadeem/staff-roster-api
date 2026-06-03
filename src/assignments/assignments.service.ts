@@ -13,6 +13,7 @@ import { toEvaluationContext } from '@/constraints/evaluation.mapper';
 import {
   AssignmentRejectedError,
   AssignmentRepository,
+  ShiftFullError,
   type AssignmentWithStaff,
   type EvaluationData,
 } from '@/database/repositories/assignment.repository';
@@ -149,6 +150,9 @@ export class AssignmentsService {
     } catch (error) {
       if (error instanceof AssignmentRejectedError) {
         throw new BadRequestException(error.message);
+      }
+      if (error instanceof ShiftFullError) {
+        throw new ConflictException(error.message);
       }
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&

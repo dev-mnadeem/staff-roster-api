@@ -162,6 +162,17 @@ export class ShiftsService {
       }
     }
 
+    if (dto.headcount !== undefined) {
+      const assigned = await this.prisma.shiftAssignment.count({
+        where: { shiftId: id },
+      });
+      if (dto.headcount < assigned) {
+        throw new BadRequestException(
+          `headcount cannot drop below the ${assigned} people already assigned`,
+        );
+      }
+    }
+
     const targetLocation =
       dto.locationId && dto.locationId !== existing.locationId
         ? await this.locationRepository.findById(dto.locationId)
