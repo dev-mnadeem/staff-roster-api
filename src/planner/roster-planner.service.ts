@@ -1,9 +1,21 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { AssignmentRepository } from '@/database/repositories/assignment.repository';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+} from '@nestjs/common';
+import type { Location, Shift } from '@prisma/client';
+import {
+  AssignmentRepository,
+  type EvaluationData,
+} from '@/database/repositories/assignment.repository';
 import { PrismaService } from '@/database/prisma.service';
-import { ConstraintEngine } from '@/constraints/constraint-engine';
+import { LocationScopeService } from '@/common/scope/location-scope.service';
+import {
+  ConstraintEngine,
+  type ExistingAssignment,
+} from '@/constraints/constraint-engine';
 import { toEvaluationContext } from '@/constraints/evaluation.mapper';
-import type { ConstraintViolation } from '@/types/assignment';
+import type { ConstraintResult, ConstraintViolation } from '@/types/assignment';
 import {
   PlannedAssignment,
   RosterPlan,
@@ -21,22 +33,74 @@ const BLOCKER_TEXT: Record<string, string> = {
   consecutive_7_block: 'would be a seventh consecutive day',
 };
 
+/** Longest window one request may plan; each extra day multiplies the work. */
+export const MAX_PLAN_DAYS = 31;
+
+type PlanShift = Shift & { location: Location };
+
 type Candidate = {
   staffId: string;
   displayName: string | null;
-  weeklyHours: number;
-  premiumShifts: number;
+};
+
+/**
+ * Everything a single planning run accumulates. The database does not change
+ * while a plan is computed — nothing is written — so evaluation data is loaded
+ * once per (shift, person) and the plan's own placements are layered on top.
+ */
+type PlanState = {
+  planned: Map<string, ExistingAssignment[]>;
+  evaluationData: Map<string, EvaluationData>;
+  pools: Map<string, Candidate[]>;
 };
 
 @Injectable()
 export class RosterPlannerService {
-  private readonly logger = new Logger(RosterPlannerService.name);
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly assignments: AssignmentRepository,
     private readonly engine: ConstraintEngine,
+    private readonly scope: LocationScopeService,
   ) {}
+
+  /**
+   * Plans within the caller's reach: admins anywhere, managers only at the
+   * locations they manage — by default all of them.
+   */
+  async planForActor(
+    actorId: string,
+    input: { from: Date; to: Date; locationIds?: string[] },
+  ): Promise<Omit<RosterPlan, 'explanation'>> {
+    const spanDays = (input.to.getTime() - input.from.getTime()) / 86_400_000;
+    if (!(spanDays > 0)) {
+      throw new BadRequestException('"to" must be after "from"');
+    }
+    if (spanDays > MAX_PLAN_DAYS) {
+      throw new BadRequestException(
+        `Plan at most ${MAX_PLAN_DAYS} days at a time`,
+      );
+    }
+
+    const ctx = await this.scope.contextFor(actorId);
+    let locationIds: string[] | null = input.locationIds?.length
+      ? input.locationIds
+      : null;
+    if (ctx.managedLocationIds !== null) {
+      const managed = ctx.managedLocationIds;
+      if (locationIds) {
+        const outside = locationIds.filter((id) => !managed.includes(id));
+        if (outside.length > 0) {
+          throw new ForbiddenException(
+            `You do not manage location(s): ${outside.join(', ')}`,
+          );
+        }
+      } else {
+        locationIds = managed;
+      }
+    }
+
+    return this.plan({ from: input.from, to: input.to, locationIds });
+  }
 
   /**
    * Proposes assignments for every unfilled slot in a window.
@@ -45,30 +109,29 @@ export class RosterPlannerService {
    * optimiser. Shifts are handled hardest-first — fewest eligible people
    * first — because filling an easy shift with someone who was the only
    * candidate for a hard one strands the hard one. Within a shift, the person
-   * with the fewest hours that week wins, with premium-shift count breaking
-   * ties so weekend work rotates.
+   * with the fewest hours in the window wins, with premium-shift count
+   * breaking ties so weekend work rotates.
    *
    * A full constraint solver would find better rosters. This runs in a request,
    * needs no solver dependency, and every decision it makes can be explained in
    * one sentence — which matters more when a manager has to defend the roster
    * to the person who got the Saturday night.
    *
-   * Cost: eligibility is re-evaluated per slot, because placing someone changes
-   * who is eligible for everything after it. That is O(slots × staff) calls to
-   * loadEvaluationData, which is fine for a week at a handful of sites and
-   * would need batching before it met a chain of hundreds.
+   * Eligibility is re-evaluated per slot, because placing someone changes who
+   * is eligible for everything after it: each placement is fed back to the
+   * constraint engine as if it were already rostered.
+   *
+   * `locationIds: null` plans every location.
    */
   async plan(input: {
     from: Date;
     to: Date;
-    locationIds: string[];
+    locationIds: string[] | null;
   }): Promise<Omit<RosterPlan, 'explanation'>> {
     const shifts = await this.prisma.shift.findMany({
       where: {
         startAt: { gte: input.from, lt: input.to },
-        ...(input.locationIds.length > 0
-          ? { locationId: { in: input.locationIds } }
-          : {}),
+        ...(input.locationIds ? { locationId: { in: input.locationIds } } : {}),
       },
       include: { assignments: true, location: true, requiredSkill: true },
       orderBy: { startAt: 'asc' },
@@ -80,6 +143,12 @@ export class RosterPlannerService {
       0,
     );
 
+    const state: PlanState = {
+      planned: new Map(),
+      evaluationData: new Map(),
+      pools: new Map(),
+    };
+
     // Score every shift's difficulty once, before placing anyone.
     const open = shifts
       .map((shift) => ({
@@ -88,104 +157,84 @@ export class RosterPlannerService {
       }))
       .filter((entry) => entry.remaining > 0);
 
-    const eligibility = new Map<string, Candidate[]>();
+    const difficulty = new Map<string, number>();
     for (const entry of open) {
-      eligibility.set(
-        entry.shift.id,
-        await this.eligibleFor(
-          entry.shift.id,
-          entry.shift.locationId,
-          entry.shift.requiredSkillId,
-        ),
-      );
+      const eligible = await this.eligibleFor(entry.shift, state);
+      difficulty.set(entry.shift.id, eligible.length / entry.remaining);
     }
+    open.sort(
+      (a, b) =>
+        (difficulty.get(a.shift.id) ?? 0) - (difficulty.get(b.shift.id) ?? 0),
+    );
 
-    // Hardest first: fewest candidates per remaining slot.
-    open.sort((a, b) => {
-      const aRatio = (eligibility.get(a.shift.id)?.length ?? 0) / a.remaining;
-      const bRatio = (eligibility.get(b.shift.id)?.length ?? 0) / b.remaining;
-      return aRatio - bRatio;
-    });
-
-    const hoursBefore = await this.weeklyHoursByStaff(input.from, input.to);
+    const before = await this.workloadByStaff(input.from, input.to);
+    const hours = new Map(before.hours);
+    const premium = new Map(before.premium);
     const placed: PlannedAssignment[] = [];
     const unfilled: UnfilledSlot[] = [];
-    // Tracks hours added by this plan, so later picks see earlier ones.
-    const addedHours = new Map<string, number>();
 
     for (const entry of open) {
-      const label = `${entry.shift.location.name} · ${entry.shift.requiredSkill.name}`;
-      const taken = new Set(entry.shift.assignments.map((a) => a.staffId));
+      const { shift } = entry;
+      const label = `${shift.location.name} · ${shift.requiredSkill.name}`;
+      const taken = new Set(shift.assignments.map((a) => a.staffId));
+      const shiftHours =
+        (shift.endAt.getTime() - shift.startAt.getTime()) / 3_600_000;
       let remaining = entry.remaining;
 
       while (remaining > 0) {
-        // Recompute eligibility each pass: a placement made moments ago may
-        // now double-book or breach rest for the next candidate.
-        const candidates = (
-          await this.eligibleFor(
-            entry.shift.id,
-            entry.shift.locationId,
-            entry.shift.requiredSkillId,
-          )
-        ).filter((c) => !taken.has(c.staffId));
-
+        const candidates = (await this.eligibleFor(shift, state)).filter(
+          (c) => !taken.has(c.staffId),
+        );
         if (candidates.length === 0) break;
 
         candidates.sort((a, b) => {
-          const aHours =
-            (hoursBefore.get(a.staffId) ?? 0) +
-            (addedHours.get(a.staffId) ?? 0);
-          const bHours =
-            (hoursBefore.get(b.staffId) ?? 0) +
-            (addedHours.get(b.staffId) ?? 0);
-          if (aHours !== bHours) return aHours - bHours;
-          return a.premiumShifts - b.premiumShifts;
+          const byHours =
+            (hours.get(a.staffId) ?? 0) - (hours.get(b.staffId) ?? 0);
+          if (byHours !== 0) return byHours;
+          return (premium.get(a.staffId) ?? 0) - (premium.get(b.staffId) ?? 0);
         });
 
         const pick = candidates[0];
-        const runningHours =
-          (hoursBefore.get(pick.staffId) ?? 0) +
-          (addedHours.get(pick.staffId) ?? 0);
+        const runningHours = hours.get(pick.staffId) ?? 0;
+        const runningPremium = premium.get(pick.staffId) ?? 0;
 
         placed.push({
-          shiftId: entry.shift.id,
+          shiftId: shift.id,
           staffId: pick.staffId,
           staffName: pick.displayName ?? 'Unnamed',
           weeklyHoursBefore: Number(runningHours.toFixed(1)),
-          premiumShiftsBefore: pick.premiumShifts,
+          premiumShiftsBefore: runningPremium,
           reason: this.reasonFor(pick, candidates, runningHours),
         });
 
         taken.add(pick.staffId);
-        const shiftHours =
-          (entry.shift.endAt.getTime() - entry.shift.startAt.getTime()) /
-          3_600_000;
-        addedHours.set(
-          pick.staffId,
-          (addedHours.get(pick.staffId) ?? 0) + shiftHours,
-        );
+        hours.set(pick.staffId, runningHours + shiftHours);
+        if (shift.isPremium) premium.set(pick.staffId, runningPremium + 1);
+        const planned = state.planned.get(pick.staffId) ?? [];
+        planned.push({
+          shiftId: shift.id,
+          startAt: shift.startAt,
+          endAt: shift.endAt,
+          locationTimezone: shift.location.timezone,
+        });
+        state.planned.set(pick.staffId, planned);
         remaining -= 1;
       }
 
       if (remaining > 0) {
         unfilled.push({
-          shiftId: entry.shift.id,
+          shiftId: shift.id,
           shiftLabel: label,
           remaining,
-          blockers: await this.blockersFor(entry.shift.id, taken),
+          blockers: await this.blockersFor(shift, taken, state),
         });
       }
-    }
-
-    const hoursAfter = new Map(hoursBefore);
-    for (const [staffId, added] of addedHours) {
-      hoursAfter.set(staffId, (hoursAfter.get(staffId) ?? 0) + added);
     }
 
     return {
       from: input.from.toISOString(),
       to: input.to.toISOString(),
-      locationIds: input.locationIds,
+      locationIds: input.locationIds ?? [],
       assignments: placed,
       unfilled,
       metrics: {
@@ -198,69 +247,76 @@ export class RosterPlannerService {
           slotsTotal === 0
             ? 0
             : Number(((alreadyFilled + placed.length) / slotsTotal).toFixed(3)),
-        hoursSpreadBefore: this.spread([...hoursBefore.values()]),
-        hoursSpreadAfter: this.spread([...hoursAfter.values()]),
+        hoursSpreadBefore: this.spread([...before.hours.values()]),
+        hoursSpreadAfter: this.spread([...hours.values()]),
       },
     };
   }
 
   // -- helpers ---------------------------------------------------------
 
+  /** Engine verdict for one person on one shift, counting the plan so far. */
+  private async evaluate(
+    shift: PlanShift,
+    staffId: string,
+    state: PlanState,
+  ): Promise<ConstraintResult | null> {
+    const key = `${shift.id}:${staffId}`;
+    let data = state.evaluationData.get(key);
+    if (!data) {
+      data = await this.assignments.loadEvaluationData(shift.id, staffId);
+      state.evaluationData.set(key, data);
+    }
+    const context = toEvaluationContext(data);
+    if (!context) return null;
+    context.existingAssignments.push(...(state.planned.get(staffId) ?? []));
+    return this.engine.evaluate(context);
+  }
+
   /** Everyone who clears every constraint rule for this shift. */
   private async eligibleFor(
-    shiftId: string,
-    locationId: string,
-    requiredSkillId: string,
+    shift: PlanShift,
+    state: PlanState,
   ): Promise<Candidate[]> {
-    const pool = await this.prisma.user.findMany({
-      where: {
-        role: 'staff',
-        skills: { some: { skillId: requiredSkillId } },
-        certifications: { some: { locationId } },
-      },
-      select: { id: true, displayName: true },
-    });
+    const poolKey = `${shift.locationId}:${shift.requiredSkillId}`;
+    let pool = state.pools.get(poolKey);
+    if (!pool) {
+      const rows = await this.prisma.user.findMany({
+        where: {
+          role: 'staff',
+          skills: { some: { skillId: shift.requiredSkillId } },
+          certifications: { some: { locationId: shift.locationId } },
+        },
+        select: { id: true, displayName: true },
+      });
+      pool = rows.map((r) => ({ staffId: r.id, displayName: r.displayName }));
+      state.pools.set(poolKey, pool);
+    }
 
     const out: Candidate[] = [];
-    for (const staff of pool) {
-      const data = await this.assignments.loadEvaluationData(shiftId, staff.id);
-      const context = toEvaluationContext(data);
-      if (!context) continue;
-      if (!this.engine.evaluate(context).allowed) continue;
-      out.push({
-        staffId: staff.id,
-        displayName: staff.displayName,
-        weeklyHours: 0,
-        premiumShifts: 0,
-      });
+    for (const candidate of pool) {
+      const result = await this.evaluate(shift, candidate.staffId, state);
+      if (result?.allowed) out.push(candidate);
     }
     return out;
   }
 
   /** Why nobody else could take the remaining slots. */
   private async blockersFor(
-    shiftId: string,
+    shift: PlanShift,
     taken: Set<string>,
+    state: PlanState,
   ): Promise<UnfilledSlot['blockers']> {
-    const shift = await this.prisma.shift.findUnique({
-      where: { id: shiftId },
-      select: { locationId: true, requiredSkillId: true },
-    });
-    if (!shift) return [];
-
-    const pool = await this.prisma.user.findMany({
+    const everyone = await this.prisma.user.findMany({
       where: { role: 'staff' },
       select: { id: true },
     });
 
     const counts = new Map<string, number>();
-    for (const staff of pool) {
+    for (const staff of everyone) {
       if (taken.has(staff.id)) continue;
-      const data = await this.assignments.loadEvaluationData(shiftId, staff.id);
-      const context = toEvaluationContext(data);
-      if (!context) continue;
-      const result = this.engine.evaluate(context);
-      if (result.allowed) continue;
+      const result = await this.evaluate(shift, staff.id, state);
+      if (!result || result.allowed) continue;
       // Attribute each person to their single most fundamental blocker, so the
       // counts read as "6 lack the skill" rather than double-counting.
       const primary: ConstraintViolation | undefined = result.blocking[0];
@@ -291,24 +347,28 @@ export class RosterPlannerService {
     );
   }
 
-  /** Hours already scheduled per staff member in the window. */
-  private async weeklyHoursByStaff(
+  /** Hours and premium shifts already scheduled per staff member in the window. */
+  private async workloadByStaff(
     from: Date,
     to: Date,
-  ): Promise<Map<string, number>> {
+  ): Promise<{ hours: Map<string, number>; premium: Map<string, number> }> {
     const rows = await this.prisma.shiftAssignment.findMany({
       where: { shift: { startAt: { gte: from, lt: to } } },
       select: {
         staffId: true,
-        shift: { select: { startAt: true, endAt: true } },
+        shift: { select: { startAt: true, endAt: true, isPremium: true } },
       },
     });
 
-    const map = new Map<string, number>();
+    const hours = new Map<string, number>();
+    const premium = new Map<string, number>();
     for (const row of rows) {
-      const hours =
+      const h =
         (row.shift.endAt.getTime() - row.shift.startAt.getTime()) / 3_600_000;
-      map.set(row.staffId, (map.get(row.staffId) ?? 0) + hours);
+      hours.set(row.staffId, (hours.get(row.staffId) ?? 0) + h);
+      if (row.shift.isPremium) {
+        premium.set(row.staffId, (premium.get(row.staffId) ?? 0) + 1);
+      }
     }
 
     // Staff with no shifts must appear as 0, or the spread looks artificially
@@ -318,9 +378,9 @@ export class RosterPlannerService {
       select: { id: true },
     });
     for (const staff of everyone) {
-      if (!map.has(staff.id)) map.set(staff.id, 0);
+      if (!hours.has(staff.id)) hours.set(staff.id, 0);
     }
-    return map;
+    return { hours, premium };
   }
 
   /** Population standard deviation; 0 when everyone has identical hours. */

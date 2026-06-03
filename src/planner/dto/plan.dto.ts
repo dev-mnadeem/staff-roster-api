@@ -14,7 +14,8 @@ export class PlanRosterDto {
   @ApiProperty({
     required: false,
     type: [String],
-    description: 'Limit to these locations. Omit for every location in scope.',
+    description:
+      'Limit to these locations. Omit for every location you manage (admins: all).',
   })
   @IsOptional()
   @IsArray()
