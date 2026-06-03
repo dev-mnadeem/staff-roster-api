@@ -56,8 +56,7 @@ export class SupabaseIdentityProvider implements IdentityProvider {
       role: payload.role as string | undefined,
       appMetadata: payload.app_metadata as Record<string, unknown> | undefined,
       userMetadata: payload.user_metadata as
-        | Record<string, unknown>
-        | undefined,
+        Record<string, unknown> | undefined,
     };
   }
 
