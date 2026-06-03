@@ -1,7 +1,13 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsInt, IsString, Matches, Max, Min } from 'class-validator';
-
-const HHMM = /^[0-2]\d:[0-5]\d$/;
+import {
+  IsInt,
+  IsString,
+  IsTimeZone,
+  Matches,
+  Max,
+  Min,
+} from 'class-validator';
+import { WALL_CLOCK_TIME } from '@/common/validation/wall-clock';
 
 export class CreateRecurringAvailabilityDto {
   @ApiProperty({ minimum: 0, maximum: 6, description: '0=Sunday' })
@@ -12,16 +18,18 @@ export class CreateRecurringAvailabilityDto {
 
   @ApiProperty({ example: '09:00' })
   @IsString()
-  @Matches(HHMM, { message: 'startTime must be HH:MM' })
+  @Matches(WALL_CLOCK_TIME, {
+    message: 'startTime must be HH:MM (00:00–24:00)',
+  })
   startTime!: string;
 
   @ApiProperty({ example: '17:00' })
   @IsString()
-  @Matches(HHMM, { message: 'endTime must be HH:MM' })
+  @Matches(WALL_CLOCK_TIME, { message: 'endTime must be HH:MM (00:00–24:00)' })
   endTime!: string;
 
   @ApiProperty({ description: 'IANA timezone identifier' })
-  @IsString()
+  @IsTimeZone()
   timezone!: string;
 }
 

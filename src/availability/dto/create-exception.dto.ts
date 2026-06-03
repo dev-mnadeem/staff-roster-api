@@ -5,10 +5,10 @@ import {
   IsDate,
   IsOptional,
   IsString,
+  IsTimeZone,
   Matches,
 } from 'class-validator';
-
-const HHMM = /^[0-2]\d:[0-5]\d$/;
+import { WALL_CLOCK_TIME } from '@/common/validation/wall-clock';
 
 export class CreateAvailabilityExceptionDto {
   @ApiProperty({ format: 'date', example: '2026-05-15' })
@@ -23,17 +23,19 @@ export class CreateAvailabilityExceptionDto {
   @ApiProperty({ required: false, example: '14:00' })
   @IsOptional()
   @IsString()
-  @Matches(HHMM, { message: 'startTime must be HH:MM' })
+  @Matches(WALL_CLOCK_TIME, {
+    message: 'startTime must be HH:MM (00:00–24:00)',
+  })
   startTime?: string;
 
   @ApiProperty({ required: false, example: '17:00' })
   @IsOptional()
   @IsString()
-  @Matches(HHMM, { message: 'endTime must be HH:MM' })
+  @Matches(WALL_CLOCK_TIME, { message: 'endTime must be HH:MM (00:00–24:00)' })
   endTime?: string;
 
   @ApiProperty()
-  @IsString()
+  @IsTimeZone()
   timezone!: string;
 }
 
