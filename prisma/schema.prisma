@@ -1,0 +1,326 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum UserRole {
+  admin
+  manager
+  staff
+}
+
+enum ShiftStatus {
+  draft
+  published
+}
+
+enum SwapType {
+  swap
+  drop
+}
+
+enum SwapStatus {
+  pending
+  accepted_by_peer
+  approved
+  rejected
+  cancelled
+  expired
+}
+
+enum NotificationType {
+  shift_assigned
+  shift_unassigned
+  shift_published
+  shift_edited
+  swap_requested
+  swap_accepted
+  swap_approved
+  swap_rejected
+  swap_cancelled
+  swap_expired
+  overtime_warning
+  availability_changed
+}
+
+enum NotificationChannel {
+  in_app
+  in_app_email
+}
+
+enum AuditEntityType {
+  shift
+  shift_assignment
+  swap_request
+  overtime_override
+}
+
+enum AuditAction {
+  create
+  update
+  delete
+  publish
+  unpublish
+  assign
+  unassign
+  swap_create
+  swap_accept
+  swap_approve
+  swap_reject
+  swap_cancel
+  override_grant
+  override_revoke
+}
+
+model User {
+  id                       String              @id @db.Uuid
+  role                     UserRole            @default(staff)
+  displayName              String?             @map("display_name")
+  desiredHoursPerWeek      Int?                @map("desired_hours_per_week")
+  notificationChannel      NotificationChannel @default(in_app_email) @map("notification_channel")
+  createdAt                DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  certifications           StaffCertification[]
+  skills                   StaffSkill[]
+  managedLocations         ManagerLocation[]
+  recurringAvailability    AvailabilityRecurring[]
+  availabilityExceptions   AvailabilityException[]
+  assignments              ShiftAssignment[]      @relation("AssignedStaff")
+  assignmentsCreated       ShiftAssignment[]      @relation("AssignedBy")
+  overtimeOverrides        OvertimeOverride[]     @relation("OverrideStaff")
+  overtimeOverridesGranted OvertimeOverride[]     @relation("OverrideApprover")
+  swapsRequested           SwapRequest[]          @relation("SwapRequester")
+  swapsTargeted            SwapRequest[]          @relation("SwapTarget")
+  swapsDecided             SwapRequest[]          @relation("SwapDecider")
+  notifications            Notification[]
+
+  @@map("users")
+}
+
+model Location {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  timezone  String
+  address   String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  certifiedStaff StaffCertification[]
+  managers       ManagerLocation[]
+  shifts         Shift[]
+
+  @@map("locations")
+}
+
+model Skill {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  staff  StaffSkill[]
+  shifts Shift[]
+
+  @@map("skills")
+}
+
+model StaffCertification {
+  staffId    String   @map("staff_id") @db.Uuid
+  locationId String   @map("location_id") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  staff    User     @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@id([staffId, locationId])
+  @@index([locationId])
+  @@map("staff_certifications")
+}
+
+model StaffSkill {
+  staffId   String   @map("staff_id") @db.Uuid
+  skillId   String   @map("skill_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  staff User  @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  skill Skill @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@id([staffId, skillId])
+  @@index([skillId])
+  @@map("staff_skills")
+}
+
+model ManagerLocation {
+  managerId  String   @map("manager_id") @db.Uuid
+  locationId String   @map("location_id") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  manager  User     @relation(fields: [managerId], references: [id], onDelete: Cascade)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@id([managerId, locationId])
+  @@index([locationId])
+  @@map("manager_locations")
+}
+
+model Shift {
+  id              String      @id @default(uuid()) @db.Uuid
+  locationId      String      @map("location_id") @db.Uuid
+  startAt         DateTime    @map("start_at") @db.Timestamptz(6)
+  endAt           DateTime    @map("end_at") @db.Timestamptz(6)
+  requiredSkillId String      @map("required_skill_id") @db.Uuid
+  headcount       Int
+  isPremium       Boolean     @default(false) @map("is_premium")
+  status          ShiftStatus @default(draft)
+  publishedAt     DateTime?   @map("published_at") @db.Timestamptz(6)
+  version         Int         @default(0)
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  location      Location          @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  requiredSkill Skill             @relation(fields: [requiredSkillId], references: [id], onDelete: Restrict)
+  assignments   ShiftAssignment[]
+
+  @@index([locationId, startAt])
+  @@index([status])
+  @@map("shifts")
+}
+
+model ShiftAssignment {
+  id           String   @id @default(uuid()) @db.Uuid
+  shiftId      String   @map("shift_id") @db.Uuid
+  staffId      String   @map("staff_id") @db.Uuid
+  assignedById String   @map("assigned_by") @db.Uuid
+  assignedAt   DateTime @default(now()) @map("assigned_at") @db.Timestamptz(6)
+
+  shift      Shift @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  staff      User  @relation("AssignedStaff", fields: [staffId], references: [id], onDelete: Cascade)
+  assignedBy User  @relation("AssignedBy", fields: [assignedById], references: [id], onDelete: Restrict)
+
+  swapsAsRequester SwapRequest[] @relation("SwapRequestingAssignment")
+  swapsAsTarget    SwapRequest[] @relation("SwapTargetAssignment")
+
+  @@unique([shiftId, staffId])
+  @@index([staffId])
+  @@map("shift_assignments")
+}
+
+model AvailabilityRecurring {
+  id        String   @id @default(uuid()) @db.Uuid
+  staffId   String   @map("staff_id") @db.Uuid
+  weekday   Int      @db.SmallInt
+  startTime String   @map("start_time") @db.VarChar(5)
+  endTime   String   @map("end_time") @db.VarChar(5)
+  timezone  String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  staff User @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@unique([staffId, weekday, startTime, timezone])
+  @@index([staffId])
+  @@map("availability_recurring")
+}
+
+model AvailabilityException {
+  id          String   @id @default(uuid()) @db.Uuid
+  staffId     String   @map("staff_id") @db.Uuid
+  date        DateTime @db.Date
+  isAvailable Boolean  @map("is_available")
+  startTime   String?  @map("start_time") @db.VarChar(5)
+  endTime     String?  @map("end_time") @db.VarChar(5)
+  timezone    String
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  staff User @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@index([staffId, date])
+  @@map("availability_exceptions")
+}
+
+model OvertimeOverride {
+  id            String   @id @default(uuid()) @db.Uuid
+  staffId       String   @map("staff_id") @db.Uuid
+  effectiveDate DateTime @map("effective_date") @db.Date
+  reason        String   @db.Text
+  approvedById  String   @map("approved_by") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  staff      User @relation("OverrideStaff", fields: [staffId], references: [id], onDelete: Cascade)
+  approvedBy User @relation("OverrideApprover", fields: [approvedById], references: [id], onDelete: Restrict)
+
+  @@unique([staffId, effectiveDate])
+  @@index([staffId])
+  @@map("overtime_overrides")
+}
+
+model SwapRequest {
+  id                       String     @id @default(uuid()) @db.Uuid
+  type                     SwapType
+  requestingAssignmentId   String     @map("requesting_assignment_id") @db.Uuid
+  requesterId              String     @map("requester_id") @db.Uuid
+  targetStaffId            String?    @map("target_staff_id") @db.Uuid
+  targetAssignmentId       String?    @map("target_assignment_id") @db.Uuid
+  status                   SwapStatus @default(pending)
+  expiresAt                DateTime?  @map("expires_at") @db.Timestamptz(6)
+  decidedById              String?    @map("decided_by") @db.Uuid
+  decidedAt                DateTime?  @map("decided_at") @db.Timestamptz(6)
+  rejectionReason          String?    @map("rejection_reason") @db.Text
+  createdAt                DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  requestingAssignment ShiftAssignment  @relation("SwapRequestingAssignment", fields: [requestingAssignmentId], references: [id], onDelete: Cascade)
+  targetAssignment     ShiftAssignment? @relation("SwapTargetAssignment", fields: [targetAssignmentId], references: [id], onDelete: SetNull)
+  requester            User             @relation("SwapRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+  targetStaff          User?            @relation("SwapTarget", fields: [targetStaffId], references: [id], onDelete: SetNull)
+  decidedBy            User?            @relation("SwapDecider", fields: [decidedById], references: [id], onDelete: SetNull)
+
+  @@index([requesterId, status])
+  @@index([targetStaffId, status])
+  @@index([status])
+  @@map("swap_requests")
+}
+
+model Notification {
+  id              String           @id @default(uuid()) @db.Uuid
+  userId          String           @map("user_id") @db.Uuid
+  type            NotificationType
+  title           String
+  body            String?
+  payload         Json?
+  emailSimulated  Boolean          @default(false) @map("email_simulated")
+  readAt          DateTime?        @map("read_at") @db.Timestamptz(6)
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([userId, readAt])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id          String          @id @default(uuid()) @db.Uuid
+  actorId     String?         @map("actor_id") @db.Uuid
+  entityType  AuditEntityType @map("entity_type")
+  entityId    String          @map("entity_id") @db.Uuid
+  action      AuditAction
+  before      Json?
+  after       Json?
+  /// Optional location for filtering audit exports per location.
+  locationId  String?         @map("location_id") @db.Uuid
+  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([entityType, entityId, createdAt(sort: Desc)])
+  @@index([actorId, createdAt(sort: Desc)])
+  @@index([locationId, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+  @@map("audit_log")
+}
