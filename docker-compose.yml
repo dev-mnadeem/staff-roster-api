@@ -1,0 +1,86 @@
+# The whole ShiftSync stack, with no accounts to create and no keys to obtain:
+#
+#   docker compose up --build
+#
+# Run from the shiftsync-be repo. Both repos must be cloned as siblings, since
+# the web service builds from ../shiftsync-fe:
+#
+#   parent/
+#   ├── shiftsync-be/   <- run compose here
+#   └── shiftsync-fe/
+#
+# With no Supabase credentials the API runs its self-hosted identity provider,
+# the database is seeded with four locations and nine staff, and you sign in
+# with any of the printed accounts. Add Supabase values to .env to switch —
+# nothing else changes.
+
+name: shiftsync
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: shiftsync
+      POSTGRES_PASSWORD: shiftsync
+      POSTGRES_DB: shiftsync
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      # Creates the minimal `auth` schema Supabase would otherwise provide, so
+      # this project's existing migration history applies unedited. See the
+      # file itself for why that matters.
+      - ./docker/00-auth-schema.sql:/docker-entrypoint-initdb.d/00-auth-schema.sql:ro
+    ports:
+      - "5436:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shiftsync -d shiftsync"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: .
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: postgresql://shiftsync:shiftsync@db:5432/shiftsync
+      DIRECT_URL: postgresql://shiftsync:shiftsync@db:5432/shiftsync
+      CORS_ORIGIN: http://localhost:3200
+      AUTH_PROVIDER: ${AUTH_PROVIDER:-}
+      LOCAL_AUTH_SECRET: ${LOCAL_AUTH_SECRET:-dev-only-secret-change-me}
+      SEED_PASSWORD: ${SEED_PASSWORD:-CoastalEats!2026}
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY:-}
+    ports:
+      - "4000:4000"
+    depends_on:
+      db:
+        condition: service_healthy
+    # Migrations and seed run here rather than in an image layer, because both
+    # need the container's network view of the database.
+    command: >
+      sh -c "npx prisma migrate deploy &&
+             npm run seed:prod &&
+             node dist/src/main.js"
+
+  web:
+    build:
+      context: ../shiftsync-fe
+      args:
+        NEXT_PUBLIC_BACKEND_ENDPOINT: http://localhost:4000/api
+    environment:
+      NEXT_PUBLIC_BACKEND_ENDPOINT: http://localhost:4000/api
+      # Server-side calls stay on the compose network.
+      API_BASE_URL_INTERNAL: http://api:4000/api
+      # Blank on purpose: this is what puts the frontend in self-hosted mode.
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-}
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:-}
+    ports:
+      # 3200 on the host: 3000 is a common local collision.
+      - "${WEB_PORT:-3200}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  db-data:
