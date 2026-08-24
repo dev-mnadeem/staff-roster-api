@@ -77,6 +77,23 @@ enum AuditAction {
   override_revoke
 }
 
+/// Credentials for the self-hosted identity provider.
+///
+/// Only used when no Supabase project is configured. Rows mirror User.id so a
+/// profile is reachable from either provider; with Supabase configured this
+/// table is simply empty and unread.
+model LocalIdentity {
+  id             String    @id @db.Uuid
+  email          String    @unique
+  /// scrypt, stored as "salt:hash" (both hex).
+  passwordHash   String    @map("password_hash")
+  emailConfirmed Boolean   @default(true) @map("email_confirmed")
+  lastSignInAt   DateTime? @map("last_sign_in_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("local_identities")
+}
+
 model User {
   id                       String              @id @db.Uuid
   role                     UserRole            @default(staff)

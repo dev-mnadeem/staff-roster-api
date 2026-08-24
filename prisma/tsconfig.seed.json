@@ -3,7 +3,11 @@
   "compilerOptions": {
     "module": "commonjs",
     "moduleResolution": "node",
-    "resolvePackageJsonExports": false
+    "resolvePackageJsonExports": false,
+    "outDir": "../dist-seed",
+    "noEmit": false
   },
-  "include": ["seed.ts"]
+  "include": [
+    "seed.ts"
+  ]
 }
