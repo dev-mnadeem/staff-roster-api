@@ -1,4 +1,5 @@
-/* eslint-disable no-console */
+import { randomBytes, randomUUID, scrypt } from 'node:crypto';
+import { promisify } from 'node:util';
 import { PrismaClient, ShiftStatus, SwapType, UserRole } from '@prisma/client';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { fromZonedTime } from 'date-fns-tz';
@@ -6,8 +7,19 @@ import { config as loadEnv } from 'dotenv';
 
 loadEnv();
 
-const SUPABASE_URL = required('SUPABASE_URL');
-const SUPABASE_SECRET_KEY = required('SUPABASE_SECRET_KEY');
+const scryptAsync = promisify(scrypt);
+
+// Supabase is optional. Without it the seed writes credentials into the
+// application's own local_identities table, so the whole dataset — and a
+// working login — can be created with nothing but a Postgres connection.
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
+const USE_SUPABASE =
+  process.env.AUTH_PROVIDER === 'supabase' ||
+  (process.env.AUTH_PROVIDER !== 'local' &&
+    Boolean(SUPABASE_URL) &&
+    Boolean(SUPABASE_SECRET_KEY));
+
 const SHARED_PASSWORD = process.env.SEED_PASSWORD ?? 'CoastalEats!2026';
 
 type SeedUser = {
@@ -19,38 +31,141 @@ type SeedUser = {
 
 const SEED_USERS: SeedUser[] = [
   // Admin (corporate)
-  { email: 'admin@coastaleats.test', displayName: 'Avery Admin', role: 'admin' },
+  {
+    email: 'admin@coastaleats.test',
+    displayName: 'Avery Admin',
+    role: 'admin',
+  },
   // Managers
-  { email: 'east-manager@coastaleats.test', displayName: 'Maya East', role: 'manager' },
-  { email: 'west-manager@coastaleats.test', displayName: 'Marco West', role: 'manager' },
+  {
+    email: 'east-manager@coastaleats.test',
+    displayName: 'Maya East',
+    role: 'manager',
+  },
+  {
+    email: 'west-manager@coastaleats.test',
+    displayName: 'Marco West',
+    role: 'manager',
+  },
   // Staff (mix of single-location + cross-tz)
-  { email: 'sarah@coastaleats.test', displayName: 'Sarah Chen', role: 'staff', desiredHoursPerWeek: 32 },
-  { email: 'john@coastaleats.test', displayName: 'John Rivera', role: 'staff', desiredHoursPerWeek: 30 },
-  { email: 'maria@coastaleats.test', displayName: 'Maria Lopez', role: 'staff', desiredHoursPerWeek: 35 },
-  { email: 'alex@coastaleats.test', displayName: 'Alex Kim', role: 'staff', desiredHoursPerWeek: 28 },
-  { email: 'priya@coastaleats.test', displayName: 'Priya Patel', role: 'staff', desiredHoursPerWeek: 40 },
-  { email: 'tom@coastaleats.test', displayName: 'Tom Nguyen', role: 'staff', desiredHoursPerWeek: 24 },
+  {
+    email: 'sarah@coastaleats.test',
+    displayName: 'Sarah Chen',
+    role: 'staff',
+    desiredHoursPerWeek: 32,
+  },
+  {
+    email: 'john@coastaleats.test',
+    displayName: 'John Rivera',
+    role: 'staff',
+    desiredHoursPerWeek: 30,
+  },
+  {
+    email: 'maria@coastaleats.test',
+    displayName: 'Maria Lopez',
+    role: 'staff',
+    desiredHoursPerWeek: 35,
+  },
+  {
+    email: 'alex@coastaleats.test',
+    displayName: 'Alex Kim',
+    role: 'staff',
+    desiredHoursPerWeek: 28,
+  },
+  {
+    email: 'priya@coastaleats.test',
+    displayName: 'Priya Patel',
+    role: 'staff',
+    desiredHoursPerWeek: 40,
+  },
+  {
+    email: 'tom@coastaleats.test',
+    displayName: 'Tom Nguyen',
+    role: 'staff',
+    desiredHoursPerWeek: 24,
+  },
+  // A second cohort. Six people covering four sites across two timezones is
+  // thinner than any real operation, and it leaves the scheduler with no slack:
+  // most shifts end up with exactly one possible candidate, so ranking by
+  // fairness never gets to make a decision.
+  {
+    email: 'nina@coastaleats.test',
+    displayName: 'Nina Alvarez',
+    role: 'staff',
+    desiredHoursPerWeek: 30,
+  },
+  {
+    email: 'omar@coastaleats.test',
+    displayName: 'Omar Haddad',
+    role: 'staff',
+    desiredHoursPerWeek: 36,
+  },
+  {
+    email: 'lena@coastaleats.test',
+    displayName: 'Lena Fischer',
+    role: 'staff',
+    desiredHoursPerWeek: 20,
+  },
+  {
+    email: 'diego@coastaleats.test',
+    displayName: 'Diego Ramos',
+    role: 'staff',
+    desiredHoursPerWeek: 32,
+  },
+  {
+    email: 'yuki@coastaleats.test',
+    displayName: 'Yuki Tanaka',
+    role: 'staff',
+    desiredHoursPerWeek: 28,
+  },
+  {
+    email: 'raj@coastaleats.test',
+    displayName: 'Raj Mehta',
+    role: 'staff',
+    desiredHoursPerWeek: 34,
+  },
 ];
 
 const SEED_LOCATIONS = [
-  { name: 'Coastal Eats — Brooklyn', timezone: 'America/New_York', address: '123 Ocean Ave, Brooklyn NY' },
-  { name: 'Coastal Eats — Boston', timezone: 'America/New_York', address: '88 Harbor St, Boston MA' },
-  { name: 'Coastal Eats — Santa Monica', timezone: 'America/Los_Angeles', address: '500 Pier Ave, Santa Monica CA' },
-  { name: 'Coastal Eats — Berkeley', timezone: 'America/Los_Angeles', address: '60 University Way, Berkeley CA' },
+  {
+    name: 'Coastal Eats — Brooklyn',
+    timezone: 'America/New_York',
+    address: '123 Ocean Ave, Brooklyn NY',
+  },
+  {
+    name: 'Coastal Eats — Boston',
+    timezone: 'America/New_York',
+    address: '88 Harbor St, Boston MA',
+  },
+  {
+    name: 'Coastal Eats — Santa Monica',
+    timezone: 'America/Los_Angeles',
+    address: '500 Pier Ave, Santa Monica CA',
+  },
+  {
+    name: 'Coastal Eats — Berkeley',
+    timezone: 'America/Los_Angeles',
+    address: '60 University Way, Berkeley CA',
+  },
 ];
 
 const SEED_SKILLS = ['server', 'bartender', 'line_cook', 'host'];
 
 async function main(): Promise<void> {
   const prisma = new PrismaClient();
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SECRET_KEY, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
+  const supabase = USE_SUPABASE
+    ? createClient(SUPABASE_URL!, SUPABASE_SECRET_KEY!, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      })
+    : null;
 
   try {
     console.log('🌊 Seeding ShiftSync…');
+    console.log(`  identity: ${supabase ? 'supabase' : 'local'}`);
 
-    const userIdByEmail = await seedUsers(supabase, prisma);
+    const userIdByEmail = supabase
+      ? await seedUsers(supabase, prisma)
+      : await seedLocalUsers(prisma);
     const locationIdByName = await seedLocations(prisma);
     const skillIdByName = await seedSkills(prisma);
 
@@ -84,6 +199,69 @@ async function main(): Promise<void> {
   } finally {
     await prisma.$disconnect();
   }
+}
+
+/**
+ * Creates users in the application's own database, for the self-hosted
+ * identity provider. Mirrors seedUsers so both paths produce the same profiles
+ * and the same credentials.
+ */
+async function seedLocalUsers(
+  prisma: PrismaClient,
+): Promise<Map<string, string>> {
+  console.log('• Users (local identities)');
+  const byEmail = new Map<string, string>();
+  const passwordHash = await hashPassword(SHARED_PASSWORD);
+
+  for (const seed of SEED_USERS) {
+    const existing = await prisma.localIdentity.findUnique({
+      where: { email: seed.email },
+    });
+    const id = existing?.id ?? randomUUID();
+
+    // public.users.id carries a foreign key to auth.users(id) — a constraint
+    // that exists in both the Supabase and local schemas — so the auth row has
+    // to come first. Writing it also lets the same signup trigger fire locally
+    // as in production, rather than diverging from it.
+    await prisma.$executeRaw`
+      INSERT INTO auth.users (id, email, email_confirmed_at, created_at, updated_at)
+      VALUES (${id}::uuid, ${seed.email}, NOW(), NOW(), NOW())
+      ON CONFLICT (id) DO NOTHING
+    `;
+
+    await prisma.localIdentity.upsert({
+      where: { email: seed.email },
+      create: { id, email: seed.email, passwordHash, emailConfirmed: true },
+      // Re-hash on every run so the documented password always works.
+      update: { passwordHash },
+    });
+
+    await prisma.user.upsert({
+      where: { id },
+      create: {
+        id,
+        role: seed.role,
+        displayName: seed.displayName,
+        desiredHoursPerWeek: seed.desiredHoursPerWeek,
+      },
+      update: {
+        role: seed.role,
+        displayName: seed.displayName,
+        desiredHoursPerWeek: seed.desiredHoursPerWeek,
+      },
+    });
+
+    if (!existing) console.log(`  + created ${seed.email}`);
+    byEmail.set(seed.email, id);
+  }
+  return byEmail;
+}
+
+/** scrypt "salt:hash", matching LocalIdentityProvider.hashPassword. */
+async function hashPassword(password: string): Promise<string> {
+  const salt = randomBytes(16).toString('hex');
+  const derived = (await scryptAsync(password, salt, 64)) as Buffer;
+  return `${salt}:${derived.toString('hex')}`;
 }
 
 async function seedUsers(
@@ -222,19 +400,29 @@ async function seedStaffCertifications(
   const santaMonica = locations.get('Coastal Eats — Santa Monica')!;
   const berkeley = locations.get('Coastal Eats — Berkeley')!;
 
-  // Sarah is certified in PT only
-  // John is certified in BOTH coasts (drives the Timezone Tangle scenario)
-  // Maria is ET only
-  // Alex is West only
-  // Priya is ET only
-  // Tom is West only
+  // Coverage is deliberately uneven, but never empty: every location/skill
+  // pairing that appears in a shift must have at least two eligible people.
+  //
+  // That floor matters. With a sparser matrix the scheduling features have
+  // nothing to decide — the planner returns "nobody is eligible" for most
+  // shifts and the fairness ranking never runs, which reads as broken rather
+  // than as correct-but-unexercised.
+  //
+  // Kept from the original design: John spans both coasts, which is what makes
+  // the cross-timezone rest and overtime rules observable.
   const certs: Array<[string, string[]]> = [
     ['sarah@coastaleats.test', [santaMonica, berkeley]],
     ['john@coastaleats.test', [santaMonica, brooklyn]],
     ['maria@coastaleats.test', [brooklyn, boston]],
-    ['alex@coastaleats.test', [berkeley]],
+    ['alex@coastaleats.test', [berkeley, boston, brooklyn]],
     ['priya@coastaleats.test', [brooklyn, boston]],
-    ['tom@coastaleats.test', [santaMonica]],
+    ['tom@coastaleats.test', [santaMonica, berkeley]],
+    ['nina@coastaleats.test', [brooklyn, boston]],
+    ['omar@coastaleats.test', [santaMonica, berkeley]],
+    ['lena@coastaleats.test', [brooklyn, boston]],
+    ['diego@coastaleats.test', [santaMonica, berkeley]],
+    ['yuki@coastaleats.test', [brooklyn, boston]],
+    ['raj@coastaleats.test', [santaMonica, brooklyn]],
   ];
   for (const [email, locationIds] of certs) {
     const staffId = users.get(email)!;
@@ -258,13 +446,21 @@ async function seedStaffSkills(
   const lineCook = skills.get('line_cook')!;
   const host = skills.get('host')!;
 
+  // Two skills each, so every shift has a real choice of who works it while
+  // staying uneven enough for the fairness ranking to have something to say.
   const map: Array<[string, string[]]> = [
     ['sarah@coastaleats.test', [bartender, server]],
-    ['john@coastaleats.test', [bartender]],
-    ['maria@coastaleats.test', [server, host]],
-    ['alex@coastaleats.test', [lineCook]],
-    ['priya@coastaleats.test', [server, host]],
+    ['john@coastaleats.test', [bartender, lineCook]],
+    ['maria@coastaleats.test', [server, lineCook]],
+    ['alex@coastaleats.test', [lineCook, server]],
+    ['priya@coastaleats.test', [server, bartender]],
     ['tom@coastaleats.test', [lineCook, server]],
+    ['nina@coastaleats.test', [bartender, server]],
+    ['omar@coastaleats.test', [lineCook, bartender]],
+    ['lena@coastaleats.test', [server, host]],
+    ['diego@coastaleats.test', [server, lineCook]],
+    ['yuki@coastaleats.test', [bartender, lineCook]],
+    ['raj@coastaleats.test', [server, bartender]],
   ];
   for (const [email, skillIds] of map) {
     const staffId = users.get(email)!;
@@ -292,6 +488,12 @@ async function seedAvailability(
     'alex@coastaleats.test': 'America/Los_Angeles',
     'priya@coastaleats.test': 'America/New_York',
     'tom@coastaleats.test': 'America/Los_Angeles',
+    'nina@coastaleats.test': 'America/New_York',
+    'omar@coastaleats.test': 'America/Los_Angeles',
+    'lena@coastaleats.test': 'America/New_York',
+    'diego@coastaleats.test': 'America/Los_Angeles',
+    'yuki@coastaleats.test': 'America/New_York',
+    'raj@coastaleats.test': 'America/New_York',
   };
 
   for (const [email, tz] of Object.entries(homeTzByEmail)) {
@@ -304,8 +506,18 @@ async function seedAvailability(
     for (let weekday = 1; weekday <= 5; weekday += 1) {
       rows.push({ weekday, start: '09:00', end: '22:00', tz });
     }
-    // Sarah and Maria also work weekends
-    if (email === 'sarah@coastaleats.test' || email === 'maria@coastaleats.test') {
+    // A weekend cohort. Only two people were available on Saturdays, which
+    // meant the premium Fri/Sat shifts the fairness report is built around
+    // could almost never be filled — the rotation had nobody to rotate between.
+    const weekendStaff = [
+      'sarah@coastaleats.test',
+      'maria@coastaleats.test',
+      'nina@coastaleats.test',
+      'omar@coastaleats.test',
+      'diego@coastaleats.test',
+      'raj@coastaleats.test',
+    ];
+    if (weekendStaff.includes(email)) {
       rows.push({ weekday: 6, start: '12:00', end: '23:00', tz });
       rows.push({ weekday: 0, start: '12:00', end: '20:00', tz });
     }
@@ -334,6 +546,80 @@ async function seedAvailability(
   });
 }
 
+/**
+ * Three weeks of completed shifts, so Analytics has something to report.
+ *
+ * Deliberately uneven: Sarah and Maria work more than Tom and Alex, and the
+ * weekend premium slots are not shared equally. A fairness report over
+ * perfectly balanced data would demonstrate nothing.
+ */
+function pastShiftSeeds(): ShiftSeed[] {
+  const out: ShiftSeed[] = [];
+  const pattern: Array<{
+    locationName: string;
+    skillName: string;
+    startLocal: string;
+    endLocal: string;
+    weekday: number;
+  }> = [
+    {
+      locationName: 'Coastal Eats — Brooklyn',
+      skillName: 'server',
+      startLocal: '11:00',
+      endLocal: '19:00',
+      weekday: 1,
+    },
+    {
+      locationName: 'Coastal Eats — Brooklyn',
+      skillName: 'bartender',
+      startLocal: '17:00',
+      endLocal: '23:00',
+      weekday: 5,
+    },
+    {
+      locationName: 'Coastal Eats — Boston',
+      skillName: 'line_cook',
+      startLocal: '10:00',
+      endLocal: '18:00',
+      weekday: 3,
+    },
+    {
+      locationName: 'Coastal Eats — Santa Monica',
+      skillName: 'server',
+      startLocal: '17:00',
+      endLocal: '23:00',
+      weekday: 6,
+    },
+    {
+      locationName: 'Coastal Eats — Berkeley',
+      skillName: 'line_cook',
+      startLocal: '12:00',
+      endLocal: '20:00',
+      weekday: 4,
+    },
+  ];
+
+  for (let week = 1; week <= 3; week++) {
+    for (const [index, slot] of pattern.entries()) {
+      // Walk back whole weeks, then to the weekday within that week.
+      const today = new Date();
+      const offsetToWeekday = slot.weekday - today.getDay();
+      const dayOffset = offsetToWeekday - week * 7;
+      out.push({
+        label: `past-w${week}-${index}`,
+        locationName: slot.locationName,
+        skillName: slot.skillName,
+        dayOffset,
+        startLocal: slot.startLocal,
+        endLocal: slot.endLocal,
+        headcount: 2,
+        publish: true,
+      });
+    }
+  }
+  return out;
+}
+
 type ShiftSeed = {
   label: string;
   locationName: string;
@@ -352,32 +638,135 @@ async function seedShifts(
   skills: Map<string, string>,
 ): Promise<Map<string, string>> {
   console.log('• Shifts');
-  // Spread shifts across the next 14 days; mix tz, draft/published,
-  // include premium (Fri 17:00+) and back-to-back days for the
-  // overtime/consecutive-days rules to demo.
+  // Two bands of data, for two different jobs.
+  //
+  // Forward-looking shifts drive the scheduling views: drafts to publish,
+  // mixed timezones, premium (Fri/Sat 17:00+) slots, and back-to-back days
+  // that trip the overtime and consecutive-day rules.
+  //
+  // Backward-looking shifts exist because Analytics reports on the *previous*
+  // four weeks. Seeding only future work left every chart reading zero hours
+  // and a large negative variance on a fresh install — the flagship screen
+  // looked broken when it was merely empty.
   const seeds: ShiftSeed[] = [
+    ...pastShiftSeeds(),
     // East coast
-    { label: 'bk-mon-bar',  locationName: 'Coastal Eats — Brooklyn', skillName: 'bartender', dayOffset: 3,  startLocal: '17:00', endLocal: '23:00', headcount: 2, publish: true },
-    { label: 'bk-tue-svr',  locationName: 'Coastal Eats — Brooklyn', skillName: 'server',    dayOffset: 4,  startLocal: '11:00', endLocal: '19:00', headcount: 3, publish: true },
-    { label: 'bk-fri-bar',  locationName: 'Coastal Eats — Brooklyn', skillName: 'bartender', dayOffset: 7,  startLocal: '17:00', endLocal: '23:30', headcount: 2, publish: true }, // premium
-    { label: 'bo-thu-cook', locationName: 'Coastal Eats — Boston',   skillName: 'line_cook', dayOffset: 6,  startLocal: '10:00', endLocal: '18:00', headcount: 2, publish: false },
-    { label: 'bo-sat-svr',  locationName: 'Coastal Eats — Boston',   skillName: 'server',    dayOffset: 8,  startLocal: '17:30', endLocal: '23:30', headcount: 4, publish: true }, // premium
+    {
+      label: 'bk-mon-bar',
+      locationName: 'Coastal Eats — Brooklyn',
+      skillName: 'bartender',
+      dayOffset: 3,
+      startLocal: '17:00',
+      endLocal: '23:00',
+      headcount: 2,
+      publish: true,
+    },
+    {
+      label: 'bk-tue-svr',
+      locationName: 'Coastal Eats — Brooklyn',
+      skillName: 'server',
+      dayOffset: 4,
+      startLocal: '11:00',
+      endLocal: '19:00',
+      headcount: 3,
+      publish: true,
+    },
+    {
+      label: 'bk-fri-bar',
+      locationName: 'Coastal Eats — Brooklyn',
+      skillName: 'bartender',
+      dayOffset: 7,
+      startLocal: '17:00',
+      endLocal: '23:30',
+      headcount: 2,
+      publish: true,
+    }, // premium
+    {
+      label: 'bo-thu-cook',
+      locationName: 'Coastal Eats — Boston',
+      skillName: 'line_cook',
+      dayOffset: 6,
+      startLocal: '10:00',
+      endLocal: '18:00',
+      headcount: 2,
+      publish: false,
+    },
+    {
+      label: 'bo-sat-svr',
+      locationName: 'Coastal Eats — Boston',
+      skillName: 'server',
+      dayOffset: 8,
+      startLocal: '17:30',
+      endLocal: '23:30',
+      headcount: 4,
+      publish: true,
+    }, // premium
     // West coast
-    { label: 'sm-mon-cook', locationName: 'Coastal Eats — Santa Monica', skillName: 'line_cook', dayOffset: 3, startLocal: '11:00', endLocal: '19:00', headcount: 2, publish: true },
-    { label: 'sm-fri-bar',  locationName: 'Coastal Eats — Santa Monica', skillName: 'bartender', dayOffset: 7, startLocal: '17:00', endLocal: '23:00', headcount: 2, publish: true }, // premium
-    { label: 'sm-sat-svr',  locationName: 'Coastal Eats — Santa Monica', skillName: 'server',    dayOffset: 8, startLocal: '17:00', endLocal: '23:00', headcount: 3, publish: true }, // premium
-    { label: 'be-wed-cook', locationName: 'Coastal Eats — Berkeley',     skillName: 'line_cook', dayOffset: 5, startLocal: '12:00', endLocal: '20:00', headcount: 2, publish: false },
+    {
+      label: 'sm-mon-cook',
+      locationName: 'Coastal Eats — Santa Monica',
+      skillName: 'line_cook',
+      dayOffset: 3,
+      startLocal: '11:00',
+      endLocal: '19:00',
+      headcount: 2,
+      publish: true,
+    },
+    {
+      label: 'sm-fri-bar',
+      locationName: 'Coastal Eats — Santa Monica',
+      skillName: 'bartender',
+      dayOffset: 7,
+      startLocal: '17:00',
+      endLocal: '23:00',
+      headcount: 2,
+      publish: true,
+    }, // premium
+    {
+      label: 'sm-sat-svr',
+      locationName: 'Coastal Eats — Santa Monica',
+      skillName: 'server',
+      dayOffset: 8,
+      startLocal: '17:00',
+      endLocal: '23:00',
+      headcount: 3,
+      publish: true,
+    }, // premium
+    {
+      label: 'be-wed-cook',
+      locationName: 'Coastal Eats — Berkeley',
+      skillName: 'line_cook',
+      dayOffset: 5,
+      startLocal: '12:00',
+      endLocal: '20:00',
+      headcount: 2,
+      publish: false,
+    },
     // A draft "open shift" Sunday night for the chaos scenario.
-    { label: 'bk-sun-svr',  locationName: 'Coastal Eats — Brooklyn', skillName: 'server',    dayOffset: 9,  startLocal: '19:00', endLocal: '23:00', headcount: 1, publish: false },
+    {
+      label: 'bk-sun-svr',
+      locationName: 'Coastal Eats — Brooklyn',
+      skillName: 'server',
+      dayOffset: 9,
+      startLocal: '19:00',
+      endLocal: '23:00',
+      headcount: 1,
+      publish: false,
+    },
   ];
 
   const map = new Map<string, string>();
   for (const seed of seeds) {
     const locationId = locations.get(seed.locationName)!;
     const requiredSkillId = skills.get(seed.skillName)!;
-    const tz = SEED_LOCATIONS.find((l) => l.name === seed.locationName)!
-      .timezone;
-    const startAt = localToUtc(daysFromToday(seed.dayOffset), seed.startLocal, tz);
+    const tz = SEED_LOCATIONS.find(
+      (l) => l.name === seed.locationName,
+    )!.timezone;
+    const startAt = localToUtc(
+      daysFromToday(seed.dayOffset),
+      seed.startLocal,
+      tz,
+    );
     const endAt = localToUtc(daysFromToday(seed.dayOffset), seed.endLocal, tz);
     const created = await prisma.shift.create({
       data: {
@@ -408,18 +797,74 @@ async function seedAssignments(
   type Pick = { shift: string; staffEmail: string; assigner: string };
   const picks: Pick[] = [
     // Brooklyn
-    { shift: 'bk-mon-bar',  staffEmail: 'john@coastaleats.test',  assigner: eastMgr },
-    { shift: 'bk-tue-svr',  staffEmail: 'maria@coastaleats.test', assigner: eastMgr },
-    { shift: 'bk-tue-svr',  staffEmail: 'priya@coastaleats.test', assigner: eastMgr },
-    { shift: 'bk-fri-bar',  staffEmail: 'john@coastaleats.test',  assigner: eastMgr },
+    {
+      shift: 'bk-mon-bar',
+      staffEmail: 'john@coastaleats.test',
+      assigner: eastMgr,
+    },
+    {
+      shift: 'bk-tue-svr',
+      staffEmail: 'maria@coastaleats.test',
+      assigner: eastMgr,
+    },
+    {
+      shift: 'bk-tue-svr',
+      staffEmail: 'priya@coastaleats.test',
+      assigner: eastMgr,
+    },
+    {
+      shift: 'bk-fri-bar',
+      staffEmail: 'john@coastaleats.test',
+      assigner: eastMgr,
+    },
     // Boston
-    { shift: 'bo-sat-svr',  staffEmail: 'maria@coastaleats.test', assigner: eastMgr },
-    { shift: 'bo-sat-svr',  staffEmail: 'priya@coastaleats.test', assigner: eastMgr },
+    {
+      shift: 'bo-sat-svr',
+      staffEmail: 'maria@coastaleats.test',
+      assigner: eastMgr,
+    },
+    {
+      shift: 'bo-sat-svr',
+      staffEmail: 'priya@coastaleats.test',
+      assigner: eastMgr,
+    },
     // Santa Monica
-    { shift: 'sm-mon-cook', staffEmail: 'tom@coastaleats.test',   assigner: westMgr },
-    { shift: 'sm-fri-bar',  staffEmail: 'sarah@coastaleats.test', assigner: westMgr }, // premium for Sarah
-    { shift: 'sm-sat-svr',  staffEmail: 'sarah@coastaleats.test', assigner: westMgr }, // premium #2 for Sarah
+    {
+      shift: 'sm-mon-cook',
+      staffEmail: 'tom@coastaleats.test',
+      assigner: westMgr,
+    },
+    {
+      shift: 'sm-fri-bar',
+      staffEmail: 'sarah@coastaleats.test',
+      assigner: westMgr,
+    }, // premium for Sarah
+    {
+      shift: 'sm-sat-svr',
+      staffEmail: 'sarah@coastaleats.test',
+      assigner: westMgr,
+    }, // premium #2 for Sarah
   ];
+
+  // Historical coverage. The rotation is uneven on purpose so the fairness
+  // and variance reports have a real distribution to show.
+  const pastRoster = [
+    ['sarah@coastaleats.test', 'john@coastaleats.test'],
+    ['maria@coastaleats.test', 'sarah@coastaleats.test'],
+    ['priya@coastaleats.test', 'maria@coastaleats.test'],
+    ['sarah@coastaleats.test', 'tom@coastaleats.test'],
+    ['alex@coastaleats.test', 'maria@coastaleats.test'],
+  ];
+  for (let week = 1; week <= 3; week++) {
+    for (let index = 0; index < pastRoster.length; index++) {
+      const label = `past-w${week}-${index}`;
+      if (!shifts.has(label)) continue;
+      const assigner = index >= 3 ? westMgr : eastMgr;
+      for (const staffEmail of pastRoster[index]) {
+        picks.push({ shift: label, staffEmail, assigner });
+      }
+    }
+  }
 
   for (const pick of picks) {
     const shiftId = shifts.get(pick.shift)!;
@@ -500,12 +945,6 @@ async function seedSwapsAndOverrides(
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
-function required(name: string): string {
-  const value = process.env[name];
-  if (!value) throw new Error(`Missing required env var: ${name}`);
-  return value;
-}
-
 function daysFromToday(offset: number): Date {
   const d = new Date();
   d.setDate(d.getDate() + offset);
@@ -522,9 +961,7 @@ function localToUtc(date: Date, hhmm: string, tz: string): Date {
 }
 
 function isPremium(startAt: Date, tz: string): boolean {
-  const local = new Date(
-    startAt.toLocaleString('en-US', { timeZone: tz }),
-  );
+  const local = new Date(startAt.toLocaleString('en-US', { timeZone: tz }));
   const day = local.getDay();
   const hour = local.getHours();
   return (day === 5 || day === 6) && hour >= 17;
