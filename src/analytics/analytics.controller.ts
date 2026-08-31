@@ -11,7 +11,7 @@ import { UserRole } from '@prisma/client';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
 import { Roles } from '@/common/decorators/roles.decorator';
 import { RolesGuard } from '@/common/guards/roles.guard';
-import { SupabaseJwtGuard } from '@/common/guards/supabase-jwt.guard';
+import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { AnalyticsService } from '@/analytics/analytics.service';
 import { FairnessReportDto } from '@/analytics/dto/fairness.dto';
 import {
@@ -25,7 +25,7 @@ import type { AuthenticatedUser } from '@/types/auth';
 @ApiBearerAuth()
 @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired JWT' })
 @ApiForbiddenResponse({ description: 'Authenticated but lacks required role' })
-@UseGuards(SupabaseJwtGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.admin, UserRole.manager)
 @Controller('analytics')
 export class AnalyticsController {
@@ -57,9 +57,6 @@ export class AnalyticsController {
     @Query() query: OvertimeProjectionQueryDto,
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<OvertimeProjectionDto> {
-    return this.analyticsService.overtimeProjection(
-      user.id,
-      query.weekStart,
-    );
+    return this.analyticsService.overtimeProjection(user.id, query.weekStart);
   }
 }

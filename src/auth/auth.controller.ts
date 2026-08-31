@@ -7,7 +7,7 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
-import { SupabaseJwtGuard } from '@/common/guards/supabase-jwt.guard';
+import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { RoutePaths } from '@/shared/constants';
 import type { AuthenticatedUser } from '@/types/auth';
 import { AuthService } from '@/auth/auth.service';
@@ -15,7 +15,7 @@ import { CurrentUserDto } from '@/auth/dto/current-user.dto';
 
 @ApiTags('Auth')
 @ApiBearerAuth()
-@UseGuards(SupabaseJwtGuard)
+@UseGuards(JwtAuthGuard)
 @Controller(RoutePaths.Me)
 export class AuthController {
   constructor(private readonly authService: AuthService) {}

@@ -1,8 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AppController } from '@/app.controller';
-import { AppService } from '@/app.service';
 import { SupabaseModule } from '@/supabase/supabase.module';
+import { IdentityModule } from '@/identity/identity.module';
 import { DatabaseModule } from '@/database/database.module';
 import { AuthModule } from '@/auth/auth.module';
 import { LocationsModule } from '@/locations/locations.module';
@@ -18,6 +18,7 @@ import { NotificationsModule } from '@/notifications/notifications.module';
 import { AuditModule } from '@/audit/audit.module';
 import { OnDutyModule } from '@/on-duty/on-duty.module';
 import { AnalyticsModule } from '@/analytics/analytics.module';
+import { PlannerModule } from '@/planner/planner.module';
 import { ScopeModule } from '@/common/scope/scope.module';
 
 @Module({
@@ -28,6 +29,7 @@ import { ScopeModule } from '@/common/scope/scope.module';
     }),
     SupabaseModule,
     DatabaseModule,
+    IdentityModule,
     ScopeModule,
     AuthModule,
     LocationsModule,
@@ -43,8 +45,9 @@ import { ScopeModule } from '@/common/scope/scope.module';
     AuditModule,
     OnDutyModule,
     AnalyticsModule,
+    PlannerModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [],
 })
 export class AppModule {}

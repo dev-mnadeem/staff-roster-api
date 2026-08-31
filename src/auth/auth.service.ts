@@ -23,8 +23,8 @@ export class AuthService {
       role: profile.role,
       displayName: profile.displayName ?? undefined,
       desiredHoursPerWeek: profile.desiredHoursPerWeek ?? undefined,
-      lastSignInAt: authUser.last_sign_in_at ?? undefined,
-      emailConfirmed: Boolean(authUser.email_confirmed_at),
+      lastSignInAt: authUser.lastSignInAt,
+      emailConfirmed: authUser.emailConfirmed,
     };
   }
 }

@@ -85,9 +85,10 @@ export class AvailabilityService {
     dto: CreateRecurringAvailabilityDto,
   ): Promise<RecurringAvailabilityDto> {
     const existing = await this.availabilityRepository.findRecurringById(id);
-    if (!existing) throw new NotFoundException(`Recurring window ${id} not found`);
+    if (!existing)
+      throw new NotFoundException(`Recurring window ${id} not found`);
     if (existing.staffId !== staffId) {
-      throw new ForbiddenException('Cannot modify another user\'s availability');
+      throw new ForbiddenException("Cannot modify another user's availability");
     }
     if (dto.endTime <= dto.startTime) {
       throw new BadRequestException('endTime must be later than startTime');
@@ -117,9 +118,10 @@ export class AvailabilityService {
 
   async deleteRecurring(staffId: string, id: string): Promise<void> {
     const existing = await this.availabilityRepository.findRecurringById(id);
-    if (!existing) throw new NotFoundException(`Recurring window ${id} not found`);
+    if (!existing)
+      throw new NotFoundException(`Recurring window ${id} not found`);
     if (existing.staffId !== staffId) {
-      throw new ForbiddenException('Cannot modify another user\'s availability');
+      throw new ForbiddenException("Cannot modify another user's availability");
     }
     await this.availabilityRepository.deleteRecurring(id);
     this.notifyManagers(staffId, 'recurring window removed');
@@ -150,7 +152,7 @@ export class AvailabilityService {
     const existing = await this.availabilityRepository.findExceptionById(id);
     if (!existing) throw new NotFoundException(`Exception ${id} not found`);
     if (existing.staffId !== staffId) {
-      throw new ForbiddenException('Cannot modify another user\'s availability');
+      throw new ForbiddenException("Cannot modify another user's availability");
     }
     this.validateExceptionTimes(dto);
 
@@ -169,7 +171,7 @@ export class AvailabilityService {
     const existing = await this.availabilityRepository.findExceptionById(id);
     if (!existing) throw new NotFoundException(`Exception ${id} not found`);
     if (existing.staffId !== staffId) {
-      throw new ForbiddenException('Cannot modify another user\'s availability');
+      throw new ForbiddenException("Cannot modify another user's availability");
     }
     await this.availabilityRepository.deleteException(id);
     this.notifyManagers(staffId, 'exception removed');
