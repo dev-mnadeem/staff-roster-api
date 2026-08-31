@@ -28,7 +28,7 @@ import { UserRole } from '@prisma/client';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
 import { Roles } from '@/common/decorators/roles.decorator';
 import { RolesGuard } from '@/common/guards/roles.guard';
-import { SupabaseJwtGuard } from '@/common/guards/supabase-jwt.guard';
+import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { RoutePaths } from '@/shared/constants';
 import type { AuthenticatedUser } from '@/types/auth';
 import { AvailabilityService } from '@/availability/availability.service';
@@ -42,13 +42,13 @@ import { RecurringAvailabilityDto } from '@/availability/dto/recurring.dto';
 @ApiBearerAuth()
 @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired JWT' })
 @ApiForbiddenResponse({ description: 'Authenticated but lacks required role' })
-@UseGuards(SupabaseJwtGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller(RoutePaths.Availability)
 export class AvailabilityController {
   constructor(private readonly availabilityService: AvailabilityService) {}
 
   @Get('me')
-  @ApiOperation({ summary: 'Get the authenticated user\'s availability' })
+  @ApiOperation({ summary: "Get the authenticated user's availability" })
   @ApiOkResponse({ type: AvailabilityDto })
   getMine(@CurrentUser() user: AuthenticatedUser): Promise<AvailabilityDto> {
     return this.availabilityService.getForStaff(user.id);
@@ -61,7 +61,8 @@ export class AvailabilityController {
     description: 'A window already exists for this weekday and start time',
   })
   @ApiBadRequestResponse({
-    description: 'Invalid times (overnight not supported, end must follow start)',
+    description:
+      'Invalid times (overnight not supported, end must follow start)',
   })
   createRecurring(
     @CurrentUser() user: AuthenticatedUser,
@@ -131,7 +132,7 @@ export class AvailabilityController {
   @Get('staff/:staffId')
   @Roles(UserRole.admin, UserRole.manager)
   @ApiOperation({
-    summary: 'View any staff member\'s availability (admin or manager)',
+    summary: "View any staff member's availability (admin or manager)",
   })
   @ApiOkResponse({ type: AvailabilityDto })
   getForStaff(

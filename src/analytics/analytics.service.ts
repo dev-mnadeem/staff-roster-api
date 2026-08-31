@@ -107,7 +107,10 @@ export class AnalyticsService {
         varianceVsDesired:
           agg.desiredHoursPerWeek === null
             ? null
-            : round1(agg.totalHours - agg.desiredHoursPerWeek * weeksBetween(from, to)),
+            : round1(
+                agg.totalHours -
+                  agg.desiredHoursPerWeek * weeksBetween(from, to),
+              ),
       }))
       .sort((a, b) => b.totalHours - a.totalHours);
 
@@ -134,7 +137,9 @@ export class AnalyticsService {
     const allowedLocationIds =
       ctx.role === UserRole.admin ? null : (ctx.managedLocationIds ?? []);
 
-    const start = weekStart ? sundayOfWeek(weekStart) : sundayOfWeek(new Date());
+    const start = weekStart
+      ? sundayOfWeek(weekStart)
+      : sundayOfWeek(new Date());
     const end = new Date(start);
     end.setUTCDate(end.getUTCDate() + 7);
 

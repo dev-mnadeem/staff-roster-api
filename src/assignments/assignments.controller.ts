@@ -28,7 +28,7 @@ import { UserRole } from '@prisma/client';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
 import { Roles } from '@/common/decorators/roles.decorator';
 import { RolesGuard } from '@/common/guards/roles.guard';
-import { SupabaseJwtGuard } from '@/common/guards/supabase-jwt.guard';
+import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import type { AuthenticatedUser } from '@/types/auth';
 import { AssignmentsService } from '@/assignments/assignments.service';
 import { AssignmentDto } from '@/assignments/dto/assignment.dto';
@@ -40,7 +40,7 @@ import { SUGGESTION_TOP_N } from '@/shared/constants';
 @ApiBearerAuth()
 @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired JWT' })
 @ApiForbiddenResponse({ description: 'Authenticated but lacks required role' })
-@UseGuards(SupabaseJwtGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('shifts/:shiftId/assignments')
 export class AssignmentsController {
   constructor(private readonly assignmentsService: AssignmentsService) {}
@@ -98,7 +98,8 @@ export class AssignmentsController {
     Array<{ staffId: string; displayName: string | null; weeklyHours: number }>
   > {
     const parsed = limit ? Number(limit) : SUGGESTION_TOP_N;
-    const cap = Number.isFinite(parsed) && parsed > 0 ? parsed : SUGGESTION_TOP_N;
+    const cap =
+      Number.isFinite(parsed) && parsed > 0 ? parsed : SUGGESTION_TOP_N;
     return this.assignmentsService.suggestForActor(
       shiftId,
       Math.min(cap, 20),

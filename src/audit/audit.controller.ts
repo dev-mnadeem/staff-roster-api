@@ -1,10 +1,4 @@
-import {
-  Controller,
-  Get,
-  Query,
-  Res,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Query, Res, UseGuards } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiForbiddenResponse,
@@ -18,7 +12,7 @@ import type { Response } from 'express';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
 import { Roles } from '@/common/decorators/roles.decorator';
 import { RolesGuard } from '@/common/guards/roles.guard';
-import { SupabaseJwtGuard } from '@/common/guards/supabase-jwt.guard';
+import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { RoutePaths } from '@/shared/constants';
 import type { AuthenticatedUser } from '@/types/auth';
 import { AuditEntryDto } from '@/audit/dto/audit-entry.dto';
@@ -29,7 +23,7 @@ import { AuditService } from '@/audit/audit.service';
 @ApiBearerAuth()
 @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired JWT' })
 @ApiForbiddenResponse({ description: 'Authenticated but lacks required role' })
-@UseGuards(SupabaseJwtGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller(RoutePaths.Audit)
 export class AuditController {
   constructor(private readonly auditService: AuditService) {}

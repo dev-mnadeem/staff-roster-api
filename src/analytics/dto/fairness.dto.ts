@@ -19,7 +19,8 @@ export class StaffFairnessRowDto {
   @ApiProperty({
     required: false,
     nullable: true,
-    description: 'totalHours minus desiredHoursPerWeek (over/under). Null when no desired hours set.',
+    description:
+      'totalHours minus desiredHoursPerWeek (over/under). Null when no desired hours set.',
   })
   varianceVsDesired!: number | null;
 }
@@ -34,6 +35,8 @@ export class FairnessReportDto {
   @ApiProperty({ type: StaffFairnessRowDto, isArray: true })
   rows!: StaffFairnessRowDto[];
 
-  @ApiProperty({ description: 'Average number of premium shifts per staff in the window' })
+  @ApiProperty({
+    description: 'Average number of premium shifts per staff in the window',
+  })
   premiumShiftsAverage!: number;
 }

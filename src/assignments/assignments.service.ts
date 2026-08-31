@@ -8,8 +8,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { SupabaseClient } from '@supabase/supabase-js';
 import { ConstraintEngine } from '@/constraints/constraint-engine';
+import { toEvaluationContext } from '@/constraints/evaluation.mapper';
 import {
   AssignmentRejectedError,
   AssignmentRepository,
@@ -21,15 +21,17 @@ import { AuditService } from '@/audit/audit.service';
 import { LocationScopeService } from '@/common/scope/location-scope.service';
 import { NotificationsService } from '@/notifications/notifications.service';
 import { PrismaService } from '@/database/prisma.service';
-import { Provides } from '@/shared/constants';
+
 import type { ConstraintResult } from '@/types/assignment';
+import { IDENTITY_PROVIDER } from '@/identity/identity.types';
+import type { IdentityProvider } from '@/identity/identity.types';
 
 @Injectable()
 export class AssignmentsService {
   private readonly logger = new Logger(AssignmentsService.name);
 
   constructor(
-    @Inject(Provides.Supabase) private readonly supabase: SupabaseClient,
+    @Inject(IDENTITY_PROVIDER) private readonly identity: IdentityProvider,
     private readonly assignmentRepository: AssignmentRepository,
     private readonly constraintEngine: ConstraintEngine,
     private readonly notificationsService: NotificationsService,
@@ -97,6 +99,9 @@ export class AssignmentsService {
         shiftId,
         staffId,
         assignedById,
+        // The repository's transactional callback is typed as async; the
+        // constraint engine itself is synchronous.
+        // eslint-disable-next-line @typescript-eslint/require-await
         async (data) => {
           const result = this.runEngine(data, shiftId, staffId);
           capturedResult = result;
@@ -111,7 +116,7 @@ export class AssignmentsService {
       void this.notificationsService.notify({
         userId: staffId,
         type: 'shift_assigned',
-        title: 'You\'ve been assigned to a shift',
+        title: "You've been assigned to a shift",
         body: `Shift ${shiftId} starts soon — check your schedule`,
         payload: { shiftId, assignmentId: created.id },
         email: true,
@@ -353,48 +358,7 @@ export class AssignmentsService {
       };
     }
 
-    return this.constraintEngine.evaluate({
-      staff: {
-        id: data.staff.id,
-        displayName: data.staff.displayName,
-        certifiedLocationIds: new Set(
-          data.staff.certifications.map((c) => c.locationId),
-        ),
-        skillIds: new Set(data.staff.skills.map((s) => s.skillId)),
-      },
-      shift: {
-        id: data.shift.id,
-        locationId: data.shift.locationId,
-        startAt: data.shift.startAt,
-        endAt: data.shift.endAt,
-        requiredSkillId: data.shift.requiredSkillId,
-        locationTimezone: data.shift.location.timezone,
-      },
-      availability: {
-        recurring: data.staff.recurringAvailability.map((r) => ({
-          weekday: r.weekday,
-          startTime: r.startTime,
-          endTime: r.endTime,
-          timezone: r.timezone,
-        })),
-        exceptions: data.staff.availabilityExceptions.map((e) => ({
-          date: e.date.toISOString().slice(0, 10),
-          isAvailable: e.isAvailable,
-          startTime: e.startTime,
-          endTime: e.endTime,
-          timezone: e.timezone,
-        })),
-      },
-      existingAssignments: data.staffAssignments.map((a) => ({
-        shiftId: a.shift.id,
-        startAt: a.shift.startAt,
-        endAt: a.shift.endAt,
-        locationTimezone: a.shift.location.timezone,
-      })),
-      overtimeOverrides: data.overrides.map((o) => ({
-        effectiveDate: o.effectiveDate.toISOString().slice(0, 10),
-      })),
-    });
+    return this.constraintEngine.evaluate(toEvaluationContext(data)!);
   }
 
   private isExclusionViolation(error: unknown): boolean {
@@ -406,32 +370,13 @@ export class AssignmentsService {
     return String(error);
   }
 
-  private async fetchEmailMap(): Promise<Map<string, string>> {
-    const map = new Map<string, string>();
-    const { data, error } = await this.supabase.auth.admin.listUsers({
-      page: 1,
-      perPage: 200,
-    });
-    if (error) {
-      this.logger.error(`Failed to list auth users: ${error.message}`);
-      return map;
-    }
-    for (const u of data.users) {
-      if (u.email) map.set(u.id, u.email);
-    }
-    return map;
+  private fetchEmailMap(): Promise<Map<string, string>> {
+    return this.identity.getEmailMap();
   }
 
   private async fetchEmail(staffId: string): Promise<string | undefined> {
-    const { data, error } =
-      await this.supabase.auth.admin.getUserById(staffId);
-    if (error) {
-      this.logger.error(
-        `Failed to load auth user ${staffId}: ${error.message}`,
-      );
-      return undefined;
-    }
-    return data.user?.email ?? undefined;
+    const account = await this.identity.getAccount(staffId);
+    return account?.email;
   }
 
   private toDto(row: AssignmentWithStaff, email?: string): AssignmentDto {

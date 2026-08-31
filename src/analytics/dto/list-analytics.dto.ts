@@ -20,7 +20,8 @@ export class OvertimeProjectionQueryDto {
   @ApiProperty({
     format: 'date',
     required: false,
-    description: 'Sunday-anchored start of the target week (YYYY-MM-DD); defaults to current week.',
+    description:
+      'Sunday-anchored start of the target week (YYYY-MM-DD); defaults to current week.',
   })
   @IsOptional()
   @Type(() => Date)
