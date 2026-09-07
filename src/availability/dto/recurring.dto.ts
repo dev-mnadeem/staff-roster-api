@@ -16,7 +16,7 @@ export class RecurringAvailabilityDto {
   @ApiProperty({ description: 'HH:MM in 24h format' })
   endTime!: string;
 
-  @ApiProperty({ description: 'IANA timezone (staff\'s home tz)' })
+  @ApiProperty({ description: "IANA timezone (staff's home tz)" })
   timezone!: string;
 
   @ApiProperty({ format: 'date-time' })

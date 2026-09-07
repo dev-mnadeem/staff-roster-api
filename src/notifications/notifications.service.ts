@@ -104,7 +104,8 @@ export class NotificationsService {
           title: i.title,
           body: i.body,
           payload: i.payload as never,
-          emailSimulated: i.email === true && emailEnabled.get(i.userId) === true,
+          emailSimulated:
+            i.email === true && emailEnabled.get(i.userId) === true,
         })),
       );
       for (const i of inputs) {
@@ -131,9 +132,7 @@ export class NotificationsService {
     return user?.notificationChannel === 'in_app_email';
   }
 
-  private async userEmailMap(
-    userIds: string[],
-  ): Promise<Map<string, boolean>> {
+  private async userEmailMap(userIds: string[]): Promise<Map<string, boolean>> {
     const map = new Map<string, boolean>();
     if (userIds.length === 0) return map;
     const rows = await this.prisma.user.findMany({
@@ -181,7 +180,7 @@ export class NotificationsService {
     if (!existing) throw new NotFoundException(`Notification ${id} not found`);
     if (existing.userId !== userId) {
       throw new ForbiddenException(
-        'Cannot mark another user\'s notification as read',
+        "Cannot mark another user's notification as read",
       );
     }
     const updated = await this.notificationRepository.markRead(id);

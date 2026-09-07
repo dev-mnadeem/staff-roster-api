@@ -154,7 +154,9 @@ export class AssignmentRepository {
         overrides,
       });
       if (!result.allowed) {
-        throw new AssignmentRejectedError(result.reason ?? 'Constraint violation');
+        throw new AssignmentRejectedError(
+          result.reason ?? 'Constraint violation',
+        );
       }
 
       const created = await tx.shiftAssignment.create({
@@ -175,7 +177,9 @@ export class AssignmentRepository {
     });
   }
 
-  isUniqueViolation(error: unknown): error is Prisma.PrismaClientKnownRequestError {
+  isUniqueViolation(
+    error: unknown,
+  ): error is Prisma.PrismaClientKnownRequestError {
     return (
       error instanceof Object &&
       'code' in error &&

@@ -1,10 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import {
-  Prisma,
-  type Location,
-  type Shift,
-  type Skill,
-} from '@prisma/client';
+import { Prisma, type Location, type Shift, type Skill } from '@prisma/client';
 import { PrismaService } from '@/database/prisma.service';
 
 export type ShiftWithRelations = Shift & {

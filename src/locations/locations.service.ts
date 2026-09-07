@@ -23,7 +23,7 @@ export class LocationsService {
           ? (ctx.managedLocationIds ?? [])
           : ctx.certifiedLocationIds;
     const rows = await this.locationRepository.list({ idsAllowed });
-    return rows.map(this.toDto);
+    return rows.map((row) => this.toDto(row));
   }
 
   async findById(id: string): Promise<LocationDto> {

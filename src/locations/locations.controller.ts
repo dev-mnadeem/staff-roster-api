@@ -25,7 +25,7 @@ import {
 import { UserRole } from '@prisma/client';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
 import { Roles } from '@/common/decorators/roles.decorator';
-import { SupabaseJwtGuard } from '@/common/guards/supabase-jwt.guard';
+import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { RolesGuard } from '@/common/guards/roles.guard';
 import { CreateLocationDto } from '@/locations/dto/create-location.dto';
 import { LocationDto } from '@/locations/dto/location.dto';
@@ -38,7 +38,7 @@ import type { AuthenticatedUser } from '@/types/auth';
 @ApiBearerAuth()
 @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired JWT' })
 @ApiForbiddenResponse({ description: 'Authenticated but lacks required role' })
-@UseGuards(SupabaseJwtGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller(RoutePaths.Locations)
 export class LocationsController {
   constructor(private readonly locationsService: LocationsService) {}
@@ -57,9 +57,7 @@ export class LocationsController {
   @ApiOperation({ summary: 'Get a location by id' })
   @ApiOkResponse({ type: LocationDto })
   @ApiNotFoundResponse({ description: 'Location not found' })
-  findById(
-    @Param('id', new ParseUUIDPipe()) id: string,
-  ): Promise<LocationDto> {
+  findById(@Param('id', new ParseUUIDPipe()) id: string): Promise<LocationDto> {
     return this.locationsService.findById(id);
   }
 
@@ -89,9 +87,7 @@ export class LocationsController {
   @ApiOperation({ summary: 'Delete a location (admin only)' })
   @ApiNoContentResponse()
   @ApiNotFoundResponse({ description: 'Location not found' })
-  async delete(
-    @Param('id', new ParseUUIDPipe()) id: string,
-  ): Promise<void> {
+  async delete(@Param('id', new ParseUUIDPipe()) id: string): Promise<void> {
     await this.locationsService.delete(id);
   }
 }
