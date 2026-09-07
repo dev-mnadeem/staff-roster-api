@@ -89,9 +89,7 @@ export class SwapRepository {
     });
   }
 
-  create(
-    data: Prisma.SwapRequestUncheckedCreateInput,
-  ): Promise<SwapRequest> {
+  create(data: Prisma.SwapRequestUncheckedCreateInput): Promise<SwapRequest> {
     return this.prisma.swapRequest.create({ data });
   }
 

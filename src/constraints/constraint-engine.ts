@@ -1,9 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { toZonedTime } from 'date-fns-tz';
-import type {
-  ConstraintResult,
-  ConstraintViolation,
-} from '@/types/assignment';
+import type { ConstraintResult, ConstraintViolation } from '@/types/assignment';
 import {
   CONSECUTIVE_DAYS_BLOCK,
   CONSECUTIVE_DAYS_WARN,
@@ -188,9 +185,7 @@ export class ConstraintEngine {
 
     // Whole-day blackout exception.
     if (
-      dateExceptions.some(
-        (e) => !e.isAvailable && (!e.startTime || !e.endTime),
-      )
+      dateExceptions.some((e) => !e.isAvailable && (!e.startTime || !e.endTime))
     ) {
       return false;
     }
@@ -355,7 +350,8 @@ export class ConstraintEngine {
     const workedDates = new Set<string>([proposedDate]);
     for (const a of ctx.existingAssignments) {
       if (a.shiftId === ctx.shift.id) continue;
-      if (this.shiftHours(a.startAt, a.endAt) < COUNTED_SHIFT_MIN_HOURS) continue;
+      if (this.shiftHours(a.startAt, a.endAt) < COUNTED_SHIFT_MIN_HOURS)
+        continue;
       workedDates.add(this.formatDateInTz(a.startAt, a.locationTimezone));
     }
 

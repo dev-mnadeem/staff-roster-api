@@ -50,9 +50,7 @@ export class AuditRepository {
     });
   }
 
-  create(
-    data: Prisma.AuditLogUncheckedCreateInput,
-  ): Promise<AuditLog> {
+  create(data: Prisma.AuditLogUncheckedCreateInput): Promise<AuditLog> {
     return this.prisma.auditLog.create({ data });
   }
 }
