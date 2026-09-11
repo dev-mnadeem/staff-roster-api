@@ -42,10 +42,7 @@ export class ShiftsService {
     private readonly prisma: PrismaService,
   ) {}
 
-  async list(
-    filters: ListShiftsFilters,
-    actorId: string,
-  ): Promise<ShiftDto[]> {
+  async list(filters: ListShiftsFilters, actorId: string): Promise<ShiftDto[]> {
     const ctx = await this.scopeService.contextFor(actorId);
     const scoped: ListShiftsFilters = { ...filters };
     if (ctx.role === UserRole.manager) {
@@ -132,7 +129,10 @@ export class ShiftsService {
   ): Promise<ShiftDto> {
     const existing = await this.shiftRepository.findById(id);
     if (!existing) throw new NotFoundException(`Shift ${id} not found`);
-    await this.scopeService.assertCanManageLocation(actorId, existing.locationId);
+    await this.scopeService.assertCanManageLocation(
+      actorId,
+      existing.locationId,
+    );
     if (dto.locationId && dto.locationId !== existing.locationId) {
       // Moving a shift to a different location requires authority over the
       // destination too.
@@ -152,7 +152,10 @@ export class ShiftsService {
         throw new BadRequestException(`Location ${dto.locationId} not found`);
       }
     }
-    if (dto.requiredSkillId && dto.requiredSkillId !== existing.requiredSkillId) {
+    if (
+      dto.requiredSkillId &&
+      dto.requiredSkillId !== existing.requiredSkillId
+    ) {
       const skill = await this.skillRepository.findById(dto.requiredSkillId);
       if (!skill) {
         throw new BadRequestException(`Skill ${dto.requiredSkillId} not found`);
@@ -200,7 +203,7 @@ export class ShiftsService {
 
     void this.notifyAssignees(id, {
       type: 'shift_edited',
-      title: 'A shift you\'re assigned to was edited',
+      title: "A shift you're assigned to was edited",
       payload: { shiftId: id },
     });
 
@@ -220,7 +223,10 @@ export class ShiftsService {
   async delete(id: string, actorId: string): Promise<void> {
     const existing = await this.shiftRepository.findById(id);
     if (!existing) throw new NotFoundException(`Shift ${id} not found`);
-    await this.scopeService.assertCanManageLocation(actorId, existing.locationId);
+    await this.scopeService.assertCanManageLocation(
+      actorId,
+      existing.locationId,
+    );
     await this.shiftRepository.delete(id);
     void this.auditService.record({
       actorId,
@@ -239,7 +245,10 @@ export class ShiftsService {
   ): Promise<ShiftDto> {
     const existing = await this.shiftRepository.findById(id);
     if (!existing) throw new NotFoundException(`Shift ${id} not found`);
-    await this.scopeService.assertCanManageLocation(actorId, existing.locationId);
+    await this.scopeService.assertCanManageLocation(
+      actorId,
+      existing.locationId,
+    );
     this.assertWithinCutoff(existing.startAt, 'publish');
     if (existing.status === ShiftStatus.published) {
       throw new BadRequestException('Shift is already published');
@@ -261,7 +270,7 @@ export class ShiftsService {
     }
     void this.notifyAssignees(id, {
       type: 'shift_published',
-      title: 'A shift you\'re assigned to was published',
+      title: "A shift you're assigned to was published",
       payload: { shiftId: id },
     });
     void this.auditService.record({
@@ -283,7 +292,10 @@ export class ShiftsService {
   ): Promise<ShiftDto> {
     const existing = await this.shiftRepository.findById(id);
     if (!existing) throw new NotFoundException(`Shift ${id} not found`);
-    await this.scopeService.assertCanManageLocation(actorId, existing.locationId);
+    await this.scopeService.assertCanManageLocation(
+      actorId,
+      existing.locationId,
+    );
     this.assertWithinCutoff(existing.startAt, 'unpublish');
     if (existing.status !== ShiftStatus.published) {
       throw new BadRequestException('Shift is not published');

@@ -5,23 +5,24 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { SupabaseClient } from '@supabase/supabase-js';
 import type { Location, Skill, UserRole } from '@prisma/client';
 import {
   type MemberWithJoins,
   TeamRepository,
 } from '@/database/repositories/team.repository';
-import { Provides } from '@/shared/constants';
+
 import { LocationDto } from '@/locations/dto/location.dto';
 import { SkillDto } from '@/skills/dto/skill.dto';
 import { TeamMemberDto } from '@/team/dto/team-member.dto';
+import { IDENTITY_PROVIDER } from '@/identity/identity.types';
+import type { IdentityProvider } from '@/identity/identity.types';
 
 @Injectable()
 export class TeamService {
   private readonly logger = new Logger(TeamService.name);
 
   constructor(
-    @Inject(Provides.Supabase) private readonly supabase: SupabaseClient,
+    @Inject(IDENTITY_PROVIDER) private readonly identity: IdentityProvider,
     private readonly teamRepository: TeamRepository,
   ) {}
 
@@ -45,7 +46,8 @@ export class TeamService {
     locationIds: string[],
   ): Promise<TeamMemberDto> {
     const member = await this.teamRepository.findMemberById(staffId);
-    if (!member) throw new NotFoundException(`Team member ${staffId} not found`);
+    if (!member)
+      throw new NotFoundException(`Team member ${staffId} not found`);
     this.requireRole(member.role, 'staff', 'certifications');
 
     const allExist = await this.teamRepository.locationsExist(locationIds);
@@ -57,12 +59,10 @@ export class TeamService {
     return this.findById(staffId);
   }
 
-  async setSkills(
-    staffId: string,
-    skillIds: string[],
-  ): Promise<TeamMemberDto> {
+  async setSkills(staffId: string, skillIds: string[]): Promise<TeamMemberDto> {
     const member = await this.teamRepository.findMemberById(staffId);
-    if (!member) throw new NotFoundException(`Team member ${staffId} not found`);
+    if (!member)
+      throw new NotFoundException(`Team member ${staffId} not found`);
     this.requireRole(member.role, 'staff', 'skills');
 
     const allExist = await this.teamRepository.skillsExist(skillIds);
@@ -105,30 +105,13 @@ export class TeamService {
     }
   }
 
-  private async fetchEmailMap(): Promise<Map<string, string>> {
-    const map = new Map<string, string>();
-    const { data, error } = await this.supabase.auth.admin.listUsers({
-      page: 1,
-      perPage: 200,
-    });
-    if (error) {
-      this.logger.error(`Failed to list auth users: ${error.message}`);
-      return map;
-    }
-    for (const u of data.users) {
-      if (u.email) map.set(u.id, u.email);
-    }
-    return map;
+  private fetchEmailMap(): Promise<Map<string, string>> {
+    return this.identity.getEmailMap();
   }
 
   private async fetchEmail(userId: string): Promise<string | undefined> {
-    const { data, error } =
-      await this.supabase.auth.admin.getUserById(userId);
-    if (error) {
-      this.logger.error(`Failed to load auth user ${userId}: ${error.message}`);
-      return undefined;
-    }
-    return data.user?.email ?? undefined;
+    const account = await this.identity.getAccount(userId);
+    return account?.email;
   }
 
   private toDto(member: MemberWithJoins, email?: string): TeamMemberDto {

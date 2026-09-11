@@ -29,7 +29,7 @@ import { UserRole } from '@prisma/client';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
 import { Roles } from '@/common/decorators/roles.decorator';
 import { RolesGuard } from '@/common/guards/roles.guard';
-import { SupabaseJwtGuard } from '@/common/guards/supabase-jwt.guard';
+import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { RoutePaths } from '@/shared/constants';
 import type { AuthenticatedUser } from '@/types/auth';
 import { CreateShiftDto } from '@/shifts/dto/create-shift.dto';
@@ -43,7 +43,7 @@ import { ShiftsService } from '@/shifts/shifts.service';
 @ApiBearerAuth()
 @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired JWT' })
 @ApiForbiddenResponse({ description: 'Authenticated but lacks required role' })
-@UseGuards(SupabaseJwtGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller(RoutePaths.Shifts)
 export class ShiftsController {
   constructor(private readonly shiftsService: ShiftsService) {}

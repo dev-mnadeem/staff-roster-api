@@ -26,7 +26,7 @@ import {
 import { UserRole } from '@prisma/client';
 import { Roles } from '@/common/decorators/roles.decorator';
 import { RolesGuard } from '@/common/guards/roles.guard';
-import { SupabaseJwtGuard } from '@/common/guards/supabase-jwt.guard';
+import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { CreateSkillDto } from '@/skills/dto/create-skill.dto';
 import { SkillDto } from '@/skills/dto/skill.dto';
 import { UpdateSkillDto } from '@/skills/dto/update-skill.dto';
@@ -37,7 +37,7 @@ import { RoutePaths } from '@/shared/constants';
 @ApiBearerAuth()
 @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired JWT' })
 @ApiForbiddenResponse({ description: 'Authenticated but lacks required role' })
-@UseGuards(SupabaseJwtGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller(RoutePaths.Skills)
 export class SkillsController {
   constructor(private readonly skillsService: SkillsService) {}
@@ -53,9 +53,7 @@ export class SkillsController {
   @ApiOperation({ summary: 'Get a skill by id' })
   @ApiOkResponse({ type: SkillDto })
   @ApiNotFoundResponse({ description: 'Skill not found' })
-  findById(
-    @Param('id', new ParseUUIDPipe()) id: string,
-  ): Promise<SkillDto> {
+  findById(@Param('id', new ParseUUIDPipe()) id: string): Promise<SkillDto> {
     return this.skillsService.findById(id);
   }
 
@@ -87,9 +85,7 @@ export class SkillsController {
   @ApiOperation({ summary: 'Delete a skill (admin only)' })
   @ApiNoContentResponse()
   @ApiNotFoundResponse({ description: 'Skill not found' })
-  async delete(
-    @Param('id', new ParseUUIDPipe()) id: string,
-  ): Promise<void> {
+  async delete(@Param('id', new ParseUUIDPipe()) id: string): Promise<void> {
     await this.skillsService.delete(id);
   }
 }

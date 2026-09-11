@@ -1,12 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import {
-  IsDate,
-  IsInt,
-  IsOptional,
-  IsUUID,
-  Min,
-} from 'class-validator';
+import { IsDate, IsInt, IsOptional, IsUUID, Min } from 'class-validator';
 
 export class UpdateShiftDto {
   @ApiProperty({ format: 'uuid', required: false })

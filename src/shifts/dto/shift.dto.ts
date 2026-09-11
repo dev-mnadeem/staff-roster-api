@@ -22,7 +22,9 @@ export class ShiftDto {
   @ApiProperty({ minimum: 1 })
   headcount!: number;
 
-  @ApiProperty({ description: 'Fri/Sat 17:00–close in the location\'s timezone' })
+  @ApiProperty({
+    description: "Fri/Sat 17:00–close in the location's timezone",
+  })
   isPremium!: boolean;
 
   @ApiProperty({ enum: ShiftStatus })
@@ -31,7 +33,9 @@ export class ShiftDto {
   @ApiProperty({ format: 'date-time', required: false, nullable: true })
   publishedAt?: string | null;
 
-  @ApiProperty({ description: 'Optimistic-lock version, incremented per write' })
+  @ApiProperty({
+    description: 'Optimistic-lock version, incremented per write',
+  })
   version!: number;
 
   @ApiProperty({ format: 'date-time' })
