@@ -6,7 +6,7 @@ export class SetManagedLocationsDto {
     type: String,
     isArray: true,
     format: 'uuid',
-    description: 'Replaces the manager\'s full set of managed locations',
+    description: "Replaces the manager's full set of managed locations",
   })
   @IsArray()
   @ArrayUnique()

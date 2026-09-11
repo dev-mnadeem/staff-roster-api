@@ -69,9 +69,8 @@ export class SwapsService {
       );
     }
 
-    const activeCount = await this.swapRepository.countActiveForRequester(
-      staffId,
-    );
+    const activeCount =
+      await this.swapRepository.countActiveForRequester(staffId);
     if (activeCount >= MAX_PENDING_SWAP_REQUESTS_PER_STAFF) {
       throw new BadRequestException(
         `You already have ${activeCount} active swap or drop requests; resolve some before opening more`,
@@ -88,11 +87,13 @@ export class SwapsService {
         throw new BadRequestException('Cannot swap with yourself');
       }
       if (dto.targetAssignmentId) {
-        const targetAssignment =
-          await this.prisma.shiftAssignment.findUnique({
-            where: { id: dto.targetAssignmentId },
-          });
-        if (!targetAssignment || targetAssignment.staffId !== dto.targetStaffId) {
+        const targetAssignment = await this.prisma.shiftAssignment.findUnique({
+          where: { id: dto.targetAssignmentId },
+        });
+        if (
+          !targetAssignment ||
+          targetAssignment.staffId !== dto.targetStaffId
+        ) {
           throw new BadRequestException(
             'targetAssignmentId must belong to targetStaffId',
           );
@@ -229,7 +230,9 @@ export class SwapsService {
   async accept(id: string, peerId: string): Promise<SwapRequestDto> {
     const swap = await this.requireActive(id);
     if (swap.type !== SwapType.swap) {
-      throw new BadRequestException('Only swap requests can be accepted by a peer');
+      throw new BadRequestException(
+        'Only swap requests can be accepted by a peer',
+      );
     }
     if (swap.targetStaffId !== peerId) {
       throw new ForbiddenException(
@@ -700,9 +703,7 @@ export class SwapsService {
       shiftStartAt: row.requestingAssignment.shift.startAt.toISOString(),
       shiftEndAt: row.requestingAssignment.shift.endAt.toISOString(),
       shiftLocationName: row.requestingAssignment.shift.location.name,
-      shiftLocationTimezone:
-        row.requestingAssignment.shift.location.timezone,
+      shiftLocationTimezone: row.requestingAssignment.shift.location.timezone,
     };
   }
 }
-

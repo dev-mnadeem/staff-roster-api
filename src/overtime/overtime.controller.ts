@@ -27,7 +27,7 @@ import { UserRole } from '@prisma/client';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
 import { Roles } from '@/common/decorators/roles.decorator';
 import { RolesGuard } from '@/common/guards/roles.guard';
-import { SupabaseJwtGuard } from '@/common/guards/supabase-jwt.guard';
+import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { CreateOvertimeOverrideDto } from '@/overtime/dto/create-override.dto';
 import { OvertimeOverrideDto } from '@/overtime/dto/override.dto';
 import { OvertimeService } from '@/overtime/overtime.service';
@@ -38,7 +38,7 @@ import type { AuthenticatedUser } from '@/types/auth';
 @ApiBearerAuth()
 @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired JWT' })
 @ApiForbiddenResponse({ description: 'Authenticated but lacks required role' })
-@UseGuards(SupabaseJwtGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.admin, UserRole.manager)
 @Controller(`${RoutePaths.Overtime}/overrides`)
 export class OvertimeController {
@@ -46,8 +46,7 @@ export class OvertimeController {
 
   @Get()
   @ApiOperation({
-    summary:
-      'List overtime overrides for a staff member (admin or manager)',
+    summary: 'List overtime overrides for a staff member (admin or manager)',
   })
   @ApiOkResponse({ type: OvertimeOverrideDto, isArray: true })
   list(
@@ -77,9 +76,7 @@ export class OvertimeController {
   @ApiOperation({ summary: 'Revoke an override' })
   @ApiNoContentResponse()
   @ApiNotFoundResponse({ description: 'Override not found' })
-  async delete(
-    @Param('id', new ParseUUIDPipe()) id: string,
-  ): Promise<void> {
+  async delete(@Param('id', new ParseUUIDPipe()) id: string): Promise<void> {
     await this.overtimeService.delete(id);
   }
 }

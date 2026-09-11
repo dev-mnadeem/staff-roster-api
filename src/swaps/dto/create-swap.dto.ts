@@ -9,7 +9,7 @@ export class CreateSwapRequestDto {
 
   @ApiProperty({
     format: 'uuid',
-    description: 'The requester\'s assignment they want to swap or drop',
+    description: "The requester's assignment they want to swap or drop",
   })
   @IsUUID()
   requestingAssignmentId!: string;
@@ -27,7 +27,7 @@ export class CreateSwapRequestDto {
     format: 'uuid',
     required: false,
     description:
-      'Optional for swap; the peer\'s assignment that the requester wants in exchange',
+      "Optional for swap; the peer's assignment that the requester wants in exchange",
   })
   @IsOptional()
   @IsUUID()

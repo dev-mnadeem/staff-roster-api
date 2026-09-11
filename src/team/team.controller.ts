@@ -20,7 +20,7 @@ import {
 import { UserRole } from '@prisma/client';
 import { Roles } from '@/common/decorators/roles.decorator';
 import { RolesGuard } from '@/common/guards/roles.guard';
-import { SupabaseJwtGuard } from '@/common/guards/supabase-jwt.guard';
+import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { RoutePaths } from '@/shared/constants';
 import { SetCertificationsDto } from '@/team/dto/set-certifications.dto';
 import { SetManagedLocationsDto } from '@/team/dto/set-managed-locations.dto';
@@ -32,7 +32,7 @@ import { TeamService } from '@/team/team.service';
 @ApiBearerAuth()
 @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired JWT' })
 @ApiForbiddenResponse({ description: 'Authenticated but lacks required role' })
-@UseGuards(SupabaseJwtGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.admin)
 @Controller(RoutePaths.Team)
 export class TeamController {
@@ -57,7 +57,7 @@ export class TeamController {
 
   @Put(':id/certifications')
   @ApiOperation({
-    summary: 'Replace a staff member\'s location certifications (admin)',
+    summary: "Replace a staff member's location certifications (admin)",
   })
   @ApiOkResponse({ type: TeamMemberDto })
   @ApiNotFoundResponse({ description: 'Team member not found' })
@@ -73,7 +73,7 @@ export class TeamController {
 
   @Put(':id/skills')
   @ApiOperation({
-    summary: 'Replace a staff member\'s skill list (admin)',
+    summary: "Replace a staff member's skill list (admin)",
   })
   @ApiOkResponse({ type: TeamMemberDto })
   @ApiNotFoundResponse({ description: 'Team member not found' })

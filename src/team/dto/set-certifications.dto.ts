@@ -6,7 +6,7 @@ export class SetCertificationsDto {
     type: String,
     isArray: true,
     format: 'uuid',
-    description: 'Replaces the staff member\'s full certification list',
+    description: "Replaces the staff member's full certification list",
   })
   @IsArray()
   @ArrayUnique()

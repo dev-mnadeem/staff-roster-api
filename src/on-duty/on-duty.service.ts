@@ -1,17 +1,18 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ShiftStatus, UserRole } from '@prisma/client';
-import { SupabaseClient } from '@supabase/supabase-js';
 import { LocationScopeService } from '@/common/scope/location-scope.service';
 import { PrismaService } from '@/database/prisma.service';
 import { OnDutyLocationDto } from '@/on-duty/dto/on-duty.dto';
-import { Provides } from '@/shared/constants';
+
+import { IDENTITY_PROVIDER } from '@/identity/identity.types';
+import type { IdentityProvider } from '@/identity/identity.types';
 
 @Injectable()
 export class OnDutyService {
   private readonly logger = new Logger(OnDutyService.name);
 
   constructor(
-    @Inject(Provides.Supabase) private readonly supabase: SupabaseClient,
+    @Inject(IDENTITY_PROVIDER) private readonly identity: IdentityProvider,
     private readonly prisma: PrismaService,
     private readonly scopeService: LocationScopeService,
   ) {}
@@ -24,7 +25,7 @@ export class OnDutyService {
    */
   async listForActor(actorId: string): Promise<OnDutyLocationDto[]> {
     const ctx = await this.scopeService.contextFor(actorId);
-    const visibleLocationIds = await this.resolveVisibleLocationIds(ctx);
+    const visibleLocationIds = this.resolveVisibleLocationIds(ctx);
     if (visibleLocationIds === null) {
       // Admin: all locations.
     } else if (visibleLocationIds.length === 0) {
@@ -34,9 +35,7 @@ export class OnDutyService {
     const now = new Date();
     const locations = await this.prisma.location.findMany({
       where:
-        visibleLocationIds === null
-          ? {}
-          : { id: { in: visibleLocationIds } },
+        visibleLocationIds === null ? {} : { id: { in: visibleLocationIds } },
       orderBy: { name: 'asc' },
       include: {
         shifts: {
@@ -86,31 +85,15 @@ export class OnDutyService {
     }));
   }
 
-  private async resolveVisibleLocationIds(
+  private resolveVisibleLocationIds(
     ctx: Awaited<ReturnType<LocationScopeService['contextFor']>>,
-  ): Promise<string[] | null> {
+  ): string[] | null {
     if (ctx.role === UserRole.admin) return null;
     if (ctx.role === UserRole.manager) return ctx.managedLocationIds ?? [];
     return ctx.certifiedLocationIds;
   }
 
-  private async fetchEmailMap(
-    ids: Set<string>,
-  ): Promise<Map<string, string>> {
-    const map = new Map<string, string>();
-    if (ids.size === 0) return map;
-    // listUsers paginates; for the small staff sets we have, a single page is fine.
-    const { data, error } = await this.supabase.auth.admin.listUsers({
-      page: 1,
-      perPage: 200,
-    });
-    if (error) {
-      this.logger.error(`Failed to list auth users: ${error.message}`);
-      return map;
-    }
-    for (const user of data.users) {
-      if (ids.has(user.id) && user.email) map.set(user.id, user.email);
-    }
-    return map;
+  private fetchEmailMap(ids: Set<string>): Promise<Map<string, string>> {
+    return this.identity.getEmailMap([...ids]);
   }
 }

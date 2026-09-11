@@ -6,7 +6,7 @@ export class SetSkillsDto {
     type: String,
     isArray: true,
     format: 'uuid',
-    description: 'Replaces the staff member\'s full skill list',
+    description: "Replaces the staff member's full skill list",
   })
   @IsArray()
   @ArrayUnique()

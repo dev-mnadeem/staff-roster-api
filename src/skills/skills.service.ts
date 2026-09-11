@@ -15,7 +15,7 @@ export class SkillsService {
 
   async list(): Promise<SkillDto[]> {
     const rows = await this.skillRepository.list();
-    return rows.map(this.toDto);
+    return rows.map((row) => this.toDto(row));
   }
 
   async findById(id: string): Promise<SkillDto> {

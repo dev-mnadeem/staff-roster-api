@@ -23,7 +23,7 @@ import { UserRole } from '@prisma/client';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
 import { Roles } from '@/common/decorators/roles.decorator';
 import { RolesGuard } from '@/common/guards/roles.guard';
-import { SupabaseJwtGuard } from '@/common/guards/supabase-jwt.guard';
+import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { RoutePaths } from '@/shared/constants';
 import type { AuthenticatedUser } from '@/types/auth';
 import { CreateSwapRequestDto } from '@/swaps/dto/create-swap.dto';
@@ -42,7 +42,7 @@ class SwapInboxDto {
 @ApiBearerAuth()
 @ApiUnauthorizedResponse({ description: 'Missing, invalid, or expired JWT' })
 @ApiForbiddenResponse({ description: 'Authenticated but lacks required role' })
-@UseGuards(SupabaseJwtGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller(RoutePaths.SwapRequests)
 export class SwapsController {
   constructor(
@@ -56,9 +56,7 @@ export class SwapsController {
       'List swap requests grouped by outgoing (mine), incoming (mine), and awaitingApproval (manager+)',
   })
   @ApiOkResponse({ type: SwapInboxDto })
-  async list(
-    @CurrentUser() user: AuthenticatedUser,
-  ): Promise<SwapInboxDto> {
+  async list(@CurrentUser() user: AuthenticatedUser): Promise<SwapInboxDto> {
     // Expire overdue drop requests on every read so the inbox view is fresh.
     await this.swapsService.expireOverdueDrops();
     const profile = await this.userRepository.findProfileById(user.id);
@@ -72,9 +70,7 @@ export class SwapsController {
       'List open drop requests the staff member is qualified to claim (skill + cert match)',
   })
   @ApiOkResponse({ type: SwapRequestDto, isArray: true })
-  listOpen(
-    @CurrentUser() user: AuthenticatedUser,
-  ): Promise<SwapRequestDto[]> {
+  listOpen(@CurrentUser() user: AuthenticatedUser): Promise<SwapRequestDto[]> {
     return this.swapsService.listOpenForStaff(user.id);
   }
 
@@ -91,7 +87,7 @@ export class SwapsController {
   @Post()
   @ApiOperation({
     summary:
-      'Create a swap or drop request for one of the requester\'s assignments',
+      "Create a swap or drop request for one of the requester's assignments",
   })
   @ApiCreatedResponse({ type: SwapRequestDto })
   @ApiBadRequestResponse({
@@ -135,7 +131,8 @@ export class SwapsController {
   })
   @ApiOkResponse({ type: SwapRequestDto })
   @ApiBadRequestResponse({
-    description: 'Not a pending drop, or constraint engine rejected the claimer',
+    description:
+      'Not a pending drop, or constraint engine rejected the claimer',
   })
   @ApiConflictResponse({ description: 'Already claimed by someone else' })
   claim(
