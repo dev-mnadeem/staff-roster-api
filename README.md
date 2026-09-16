@@ -2,7 +2,7 @@
 
 Backend for a staff scheduling app built around a restaurant group with four locations in two timezones. Managers create shifts, assign staff, handle swaps and availability, and can ask the planner to suggest who should fill open slots. Built with NestJS, Prisma and PostgreSQL.
 
-The web frontend lives in a separate `shiftsync-fe` repo.
+The web frontend is [staff-roster-web](https://github.com/dev-mnadeem/staff-roster-web).
 
 ![Planner screen](docs/screenshots/planner.png)
 
@@ -17,9 +17,12 @@ The web frontend lives in a separate `shiftsync-fe` repo.
 
 ## Getting started
 
-The easiest way is Docker Compose. It expects `shiftsync-fe` to be cloned next to this repo, since the web service builds from `../shiftsync-fe`.
+The easiest way is Docker Compose. Clone both repositories as siblings. The web build defaults to `../staff-roster-web`; set `STAFF_WEB_CONTEXT` if your checkout is elsewhere.
 
 ```bash
+git clone https://github.com/dev-mnadeem/staff-roster-api.git
+git clone https://github.com/dev-mnadeem/staff-roster-web.git
+cd staff-roster-api
 docker compose up --build
 ```
 
@@ -34,9 +37,11 @@ The database gets seeded with locations, staff and some history. All seeded acco
 You need a Postgres database. Apply the auth schema stub once, since a few migrations expect objects that Supabase normally provides:
 
 ```bash
-psql "$DATABASE_URL" -f docker/00-auth-schema.sql
-npm ci
 cp .env.example .env
+# Set DATABASE_URL and DIRECT_URL to your database in .env first.
+# Export DATABASE_URL in this terminal too: psql does not read the app's .env.
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f docker/00-auth-schema.sql
+npm ci
 npx prisma migrate deploy
 npm run seed
 npm run start:dev
@@ -60,10 +65,17 @@ See `.env.example`. The main variables:
 npm test
 ```
 
-Unit tests cover the constraint engine (including timezone cases), the local identity provider and the plan explainer. They don't need a database or network.
+Unit tests cover the constraint engine (including timezone cases), shared Sunday-week keys, the local identity provider and the plan explainer. They don't need a database or network.
 
 ## Notes
 
 - The local auth provider is meant for development. It has no refresh tokens, lockout or password reset.
 - The planner recomputes eligibility after each placement, which is fine for a handful of sites but would need batching for a larger chain.
 - Applying a suggested plan is still done one assignment at a time.
+
+Weekly-hour ranking uses the same location calendar week as the constraint engine.
+The regressions cover Saturday evening in Los Angeles crossing into Sunday UTC,
+different weeks at the same instant across sites, and both daylight-saving transitions.
+A native run also applied all 15 migrations, seeded the local identity provider, and
+verified admin planning and staff restrictions in the web app. Docker image execution
+remains unverified here.

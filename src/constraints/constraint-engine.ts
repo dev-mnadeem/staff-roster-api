@@ -1,3 +1,4 @@
+import { weekKeyInTimezone } from '@/common/time/week';
 import { Injectable } from '@nestjs/common';
 import { toZonedTime } from 'date-fns-tz';
 import type { ConstraintResult, ConstraintViolation } from '@/types/assignment';
@@ -290,7 +291,7 @@ export class ConstraintEngine {
 
     let dailyHoursOthers = 0;
     let weeklyHoursOthers = 0;
-    const weekKey = this.weekKeyFor(ctx.shift.startAt, tz);
+    const weekKey = weekKeyInTimezone(ctx.shift.startAt, tz);
 
     for (const a of ctx.existingAssignments) {
       if (a.shiftId === ctx.shift.id) continue;
@@ -302,7 +303,7 @@ export class ConstraintEngine {
       if (aDate === proposedDate) {
         dailyHoursOthers += aHours;
       }
-      if (this.weekKeyFor(a.startAt, a.locationTimezone) === weekKey) {
+      if (weekKeyInTimezone(a.startAt, a.locationTimezone) === weekKey) {
         weeklyHoursOthers += aHours;
       }
     }
@@ -386,18 +387,6 @@ export class ConstraintEngine {
 
   private shiftHours(startAt: Date, endAt: Date): number {
     return (endAt.getTime() - startAt.getTime()) / (1000 * 60 * 60);
-  }
-
-  /** Sunday-anchored week key (YYYY-MM-DD of that week's Sunday) in `tz`. */
-  private weekKeyFor(date: Date, tz: string): string {
-    const local = toZonedTime(date, tz);
-    const dayOfWeek = local.getDay();
-    const sunday = new Date(local);
-    sunday.setDate(sunday.getDate() - dayOfWeek);
-    const y = sunday.getFullYear();
-    const m = String(sunday.getMonth() + 1).padStart(2, '0');
-    const d = String(sunday.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
   }
 
   /** YYYY-MM-DD math without timezone conversion (assumes inputs are wall-clock). */

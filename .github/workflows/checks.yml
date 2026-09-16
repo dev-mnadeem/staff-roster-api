@@ -1,0 +1,17 @@
+name: Scheduling constraints
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  timezone-and-engine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npx prisma generate
+      - run: npm test -- --runInBand
+      - run: npm run build

@@ -1,3 +1,4 @@
+import { hoursInWeek } from '@/common/time/week';
 import {
   BadRequestException,
   ConflictException,
@@ -225,26 +226,15 @@ export class AssignmentsService {
 
   private weeklyHoursFor(data: EvaluationData): number {
     if (!data.shift) return 0;
-    // Sunday-anchored week containing the shift start, in shift location tz.
-    // Approximation: bucket by UTC day-of-week with no tz conversion (good
-    // enough for fairness ranking; precise math lives in the engine).
-    const shiftStart = data.shift.startAt;
-    const day = shiftStart.getUTCDay();
-    const sunday = new Date(shiftStart);
-    sunday.setUTCDate(sunday.getUTCDate() - day);
-    sunday.setUTCHours(0, 0, 0, 0);
-    const nextSunday = new Date(sunday);
-    nextSunday.setUTCDate(nextSunday.getUTCDate() + 7);
-
-    let hours = 0;
-    for (const a of data.staffAssignments) {
-      if (a.shift.startAt >= sunday && a.shift.startAt < nextSunday) {
-        hours +=
-          (a.shift.endAt.getTime() - a.shift.startAt.getTime()) /
-          (1000 * 60 * 60);
-      }
-    }
-    return hours;
+    return hoursInWeek(
+      data.shift.startAt,
+      data.shift.location.timezone,
+      data.staffAssignments.map(({ shift }) => ({
+        startAt: shift.startAt,
+        endAt: shift.endAt,
+        timezone: shift.location.timezone,
+      })),
+    );
   }
 
   /** Manager-or-admin check: caller must manage the shift's location. */

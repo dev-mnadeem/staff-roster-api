@@ -3,11 +3,11 @@
 #   docker compose up --build
 #
 # Run from the shiftsync-be repo. Both repos must be cloned as siblings, since
-# the web service builds from ../shiftsync-fe:
+# the web service builds from ../staff-roster-web:
 #
 #   parent/
-#   ├── shiftsync-be/   <- run compose here
-#   └── shiftsync-fe/
+#   ├── staff-roster-api/   <- run compose here
+#   └── staff-roster-web/
 #
 # With no Supabase credentials the API runs its self-hosted identity provider,
 # the database is seeded with four locations and nine staff, and you sign in
@@ -65,7 +65,7 @@ services:
 
   web:
     build:
-      context: ../shiftsync-fe
+      context: ${STAFF_WEB_CONTEXT:-../staff-roster-web}
       args:
         NEXT_PUBLIC_BACKEND_ENDPOINT: http://localhost:4000/api
     environment:
