@@ -79,3 +79,7 @@ different weeks at the same instant across sites, and both daylight-saving trans
 A native run also applied all 15 migrations, seeded the local identity provider, and
 verified admin planning and staff restrictions in the web app. Docker image execution
 remains unverified here.
+
+## Author
+
+[**Muhammad Nadeem**](https://github.com/dev-mnadeem)

@@ -99,5 +99,8 @@
     "transformIgnorePatterns": [
       "/node_modules/(?!jose)"
     ]
+  },
+  "overrides": {
+    "multer": "^2.5.0"
   }
 }
